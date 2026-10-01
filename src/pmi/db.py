@@ -73,8 +73,20 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _check_no_floats(obj: object, path: str = "") -> None:
+    if isinstance(obj, float):
+        raise ValueError(f"Float-Werte im Payload verboten (kein RFC-8785-konformes JSON): {path}={obj!r}")
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            _check_no_floats(v, f"{path}.{k}" if path else k)
+    elif isinstance(obj, list):
+        for i, v in enumerate(obj):
+            _check_no_floats(v, f"{path}[{i}]")
+
+
 def _canonical_json(payload: dict) -> bytes:
-    """Kanonisches JSON: sortierte Schlüssel, kein Whitespace, UTF-8. Feste Serialisierung."""
+    """Kanonisches JSON: sortierte Schlüssel, kein Whitespace, UTF-8. Floats verboten."""
+    _check_no_floats(payload)
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 

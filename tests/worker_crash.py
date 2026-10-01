@@ -115,9 +115,127 @@ def scenario_reconcile(db_path: str, repo_path: str) -> None:
     adapter.reconcile_applied_executions()
 
 
-def scenario_c6_fail_attempt(db_path: str, repo_path: str) -> None:
-    """C6-Gegenprobe: versucht FAILED mit zero_effect_proof zu setzen.
-    Schlägt fehl wenn HEAD sich geändert hat (ohne Break); ohne HEAD-Prüfung (C6-Break) → FAILED gesetzt."""
+def scenario_cp_c0(db_path: str, repo_path: str) -> None:
+    """C0-Gegenprobe: Authorization.used=1 vor Transaktion schreiben → überlebt Crash."""
+    import os as _os
+    from pmi.db import get_db, init_schema
+    from pmi.approval import approve
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
+    head = _git_head(repo_path)
+    _, request_id = _setup_request(conn, payload, expected_revision=head)
+    auth = approve(conn, request_id, person="alice")
+    # BREAK: mark used=1 outside the begin_execution transaction
+    conn.execute("UPDATE Authorization SET used=1 WHERE id=?", (auth.id,))
+    conn.commit()
+    _os._exit(1)
+
+
+def scenario_cp_c1(db_path: str, repo_path: str) -> None:
+    """C1-Gegenprobe: _cleanup_orphaned_tmp_files deaktiviert → orphaned .pmi_tmp_* bleibt."""
+    from pmi.db import get_db, init_schema
+    from pmi.approval import approve
+    from pmi.state_machine import begin_execution
+    from pmi.git_adapter import GitProjectStoreAdapter
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
+
+    existing = conn.execute(
+        "SELECT id, idempotency_key FROM Execution WHERE status='STARTED' "
+        "ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if existing:
+        execution_id = existing["id"]
+        idem_key = existing["idempotency_key"]
+        expected_rev = conn.execute(
+            "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+        ).fetchone()["expected_revision"] or ""
+    else:
+        head = _git_head(repo_path)
+        _, request_id = _setup_request(conn, payload, expected_revision=head)
+        auth = approve(conn, request_id, person="alice")
+        idem_key = str(uuid.uuid4())
+        execution_id = begin_execution(conn, request_id=request_id, auth_id=auth.id,
+                                       idempotency_key=idem_key, repo_path=repo_path)
+        expected_rev = head
+
+    # BREAK: disable orphaned temp-file cleanup
+    GitProjectStoreAdapter._cleanup_orphaned_tmp_files = lambda self: None
+
+    adapter = GitProjectStoreAdapter(repo_path=Path(repo_path), db=conn)
+    adapter.apply(payload=payload, expected_revision=expected_rev,
+                  idempotency_key=idem_key, execution_id=execution_id)
+
+
+def scenario_cp_c3(db_path: str, repo_path: str) -> None:
+    """C3-Gegenprobe: Authorization außerhalb Transaktion / leere Signatur → halbfertiger Datensatz."""
+    import os as _os
+    from pmi.db import get_db, init_schema
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
+    _, request_id = _setup_request(conn, payload)
+    auth_id = str(uuid.uuid4())
+    # BREAK: write partial record (no signature) outside transaction
+    conn.execute(
+        "INSERT INTO Authorization (id, request_id, decided_by, expires_at, used, signature) "
+        "VALUES (?, ?, ?, datetime('now', '+86400 seconds'), 0, '')",
+        (auth_id, request_id, "human:alice"),
+    )
+    conn.commit()
+    _os._exit(1)
+
+
+def scenario_cp_c4a(db_path: str, repo_path: str) -> None:
+    """C4a-Gegenprobe: _cleanup_leftover + _atomic_rename deaktiviert → tampered content committed."""
+    from pmi.db import get_db, init_schema
+    from pmi.approval import approve
+    from pmi.state_machine import begin_execution
+    from pmi.git_adapter import GitProjectStoreAdapter
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
+
+    existing = conn.execute(
+        "SELECT id, idempotency_key FROM Execution WHERE status='STARTED' "
+        "ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if existing:
+        execution_id = existing["id"]
+        idem_key = existing["idempotency_key"]
+        expected_rev = conn.execute(
+            "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+        ).fetchone()["expected_revision"] or ""
+    else:
+        head = _git_head(repo_path)
+        _, request_id = _setup_request(conn, payload, expected_revision=head)
+        auth = approve(conn, request_id, person="alice")
+        idem_key = str(uuid.uuid4())
+        execution_id = begin_execution(conn, request_id=request_id, auth_id=auth.id,
+                                       idempotency_key=idem_key, repo_path=repo_path)
+        expected_rev = head
+
+    # Write tampered content to target file
+    target = Path(repo_path) / str(payload.get("path", "output.txt"))
+    target.write_text("TAMPERED")
+
+    # BREAK: disable cleanup and rename so tampered content gets committed
+    GitProjectStoreAdapter._cleanup_leftover = lambda self, p, k: None
+    GitProjectStoreAdapter._atomic_rename = lambda self, tmp, tgt: tmp.unlink(missing_ok=True)
+
+    adapter = GitProjectStoreAdapter(repo_path=Path(repo_path), db=conn)
+    adapter.apply(payload=payload, expected_revision=expected_rev,
+                  idempotency_key=idem_key, execution_id=execution_id)
+
+
+def scenario_cp_c6(db_path: str, repo_path: str) -> None:
+    """C6-Gegenprobe: HEAD-Prüfung deaktiviert → FAILED trotz geändertem HEAD."""
     from pmi.db import get_db, init_schema
     from pmi.state_machine import ExecutionStatus, transition
 
@@ -128,8 +246,11 @@ def scenario_c6_fail_attempt(db_path: str, repo_path: str) -> None:
     ).fetchone()
     if existing is None:
         raise RuntimeError("Kein STARTED-Datensatz gefunden")
+    # BREAK: clear repo_path so HEAD check is skipped in transition(FAILED)
+    conn.execute("UPDATE Execution SET repo_path='' WHERE id=?", (existing["id"],))
+    conn.commit()
     transition(conn, execution_id=existing["id"], to_state=ExecutionStatus.FAILED,
-               zero_effect_proof="kein-Schreibvorgang-Gegenprobe")
+               zero_effect_proof="kein-Schreibvorgang-Gegenprobe-c6")
 
 
 SCENARIOS = {
@@ -137,7 +258,11 @@ SCENARIOS = {
     "adapter_apply": scenario_adapter_apply,
     "authorization": scenario_authorization,
     "reconcile": scenario_reconcile,
-    "c6_fail_attempt": scenario_c6_fail_attempt,
+    "cp_c0": scenario_cp_c0,
+    "cp_c1": scenario_cp_c1,
+    "cp_c3": scenario_cp_c3,
+    "cp_c4a": scenario_cp_c4a,
+    "cp_c6": scenario_cp_c6,
 }
 
 

@@ -1,6 +1,5 @@
 """Atomarer Git-Write mit CAS und Idempotenz."""
 import json
-import os
 import sqlite3
 import subprocess
 import tempfile
@@ -63,6 +62,13 @@ class GitProjectStoreAdapter:
                 "Adapter-Aufruf ohne gültiges STARTED verboten (I6)."
             )
 
+    def _cleanup_orphaned_tmp_files(self) -> None:
+        for leftover_tmp in self.repo_path.glob(".pmi_tmp_*"):
+            leftover_tmp.unlink(missing_ok=True)
+
+    def _atomic_rename(self, tmp_path: Path, target_path: Path) -> None:
+        tmp_path.rename(target_path)
+
     def apply(
         self,
         payload: dict,
@@ -98,16 +104,11 @@ class GitProjectStoreAdapter:
         if current_head != expected_revision:
             return ApplyResult.REVISION_CONFLICT
 
-        # Reconciliation: war eine temp-Datei vorhanden (post_rename_pre_commit)?
-        # C4a-Gegenprobe: deaktiviert mit PMI_COUNTERPROOF=c4a.
-        if os.environ.get("PMI_COUNTERPROOF") != "c4a":
-            self._cleanup_leftover(payload, idempotency_key)
+        # Reconciliation: war eine Zieldatei vorhanden (post_rename_pre_commit-Crash)?
+        self._cleanup_leftover(payload, idempotency_key)
 
         # Verwaiste Temp-Dateien aus früheren Crashes bereinigen.
-        # C1-Gegenprobe: deaktiviert mit PMI_COUNTERPROOF=c1.
-        if os.environ.get("PMI_COUNTERPROOF") != "c1":
-            for leftover_tmp in self.repo_path.glob(".pmi_tmp_*"):
-                leftover_tmp.unlink(missing_ok=True)
+        self._cleanup_orphaned_tmp_files()
 
         # Temp-Datei schreiben
         target_path = self.repo_path / str(payload.get("path", "output.txt"))
@@ -127,12 +128,7 @@ class GitProjectStoreAdapter:
 
         maybe_crash("pre_rename")
 
-        # Atomares Rename.
-        # C4a-Gegenprobe: Rename übersprungen, damit manipulierter Inhalt (target) committet wird.
-        if os.environ.get("PMI_COUNTERPROOF") != "c4a":
-            tmp_path.rename(target_path)
-        else:
-            tmp_path.unlink(missing_ok=True)
+        self._atomic_rename(tmp_path, target_path)
 
         maybe_crash("post_rename_pre_commit")
 

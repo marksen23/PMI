@@ -603,3 +603,29 @@ def test_canonical_json_nested(tmp_db_path):
     h1 = compute_request_hash({"z": {"b": 1, "a": 2}, "y": [3, 4]})
     h2 = compute_request_hash({"y": [3, 4], "z": {"a": 2, "b": 1}})
     assert h1 == h2
+
+
+def test_canonical_json_rejects_floats():
+    """Float-Werte im Payload → ValueError."""
+    from pmi.db import compute_request_hash
+    with pytest.raises(ValueError, match="Float"):
+        compute_request_hash({"value": 1.5})
+
+
+def test_canonical_json_rejects_nested_floats():
+    """Verschachtelter Float → ValueError."""
+    from pmi.db import compute_request_hash
+    with pytest.raises(ValueError, match="Float"):
+        compute_request_hash({"nested": {"deep": 3.14}})
+
+
+def test_no_counterproof_in_production_code():
+    """Produktionscode enthält keine PMI_COUNTERPROOF-Schalter."""
+    import pmi
+    from pathlib import Path as _Path
+    src_dir = _Path(pmi.__file__).parent
+    violations = []
+    for py_file in src_dir.rglob("*.py"):
+        if "COUNTERPROOF" in py_file.read_text():
+            violations.append(str(py_file.relative_to(src_dir.parent)))
+    assert not violations, f"COUNTERPROOF in Produktionscode gefunden: {violations}"

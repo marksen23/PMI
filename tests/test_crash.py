@@ -19,7 +19,7 @@ import pytest
 
 WORKER = Path(__file__).parent / "worker_crash.py"
 RUNS = 50
-COUNTERPROOF_RUNS = 2  # Gegenproben mit RUNS=2 für Geschwindigkeit
+COUNTERPROOF_RUNS = 2
 
 
 def _git_head(repo: Path) -> str:
@@ -49,18 +49,6 @@ def _run_worker_clean(scenario: str, db_path: Path, repo_path: Path) -> int:
     env = os.environ.copy()
     env.pop("PMI_FAULT_INJECT", None)
     env.pop("PMI_COUNTERPROOF", None)
-    result = subprocess.run(
-        [sys.executable, str(WORKER), scenario, str(db_path), str(repo_path)],
-        env=env,
-    )
-    return result.returncode
-
-
-def _run_worker_counterproof(scenario: str, db_path: Path, repo_path: Path, break_id: str) -> int:
-    """Worker mit aktivierter Recovery-Logik-Unterbrechung (PMI_COUNTERPROOF=<break_id>)."""
-    env = os.environ.copy()
-    env.pop("PMI_FAULT_INJECT", None)
-    env["PMI_COUNTERPROOF"] = break_id
     result = subprocess.run(
         [sys.executable, str(WORKER), scenario, str(db_path), str(repo_path)],
         env=env,
@@ -368,4 +356,84 @@ def test_c6_crash_post_start_pre_write(tmp_path):
             assert _git_head(repo) == head_at_request, (
                 "FAILED ist nur gültig wenn HEAD seit Request-Erstellung unverändert ist"
             )
+        conn.close()
+
+
+# ── Gegenproben: Recovery-Logik brechen ──────────────────────────────────────
+
+
+def test_c0_counterproof(tmp_path):
+    """Gegenprobe C0: Authorization.used=1 VOR Transaktion → assert used==0 würde fehlschlagen."""
+    for _ in range(COUNTERPROOF_RUNS):
+        db_path = tmp_path / f"c0cp_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"c0cp_{uuid.uuid4().hex}")
+        rc = _run_worker_clean("cp_c0", db_path, repo)
+        assert rc != 0, "cp_c0 muss mit os._exit(1) enden"
+        conn = sqlite3.connect(str(db_path))
+        used = conn.execute("SELECT used FROM Authorization LIMIT 1").fetchone()
+        assert used is not None and used[0] == 1, "BREAK: used=1 trotz Crash – Atomizität verletzt"
+        conn.close()
+
+
+def test_c1_counterproof(tmp_path):
+    """Gegenprobe C1: _cleanup_orphaned_tmp_files deaktiviert → orphaned .pmi_tmp_* bleibt."""
+    for _ in range(COUNTERPROOF_RUNS):
+        db_path = tmp_path / f"c1cp_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"c1cp_{uuid.uuid4().hex}")
+        rc = _run_worker("adapter_apply", db_path, repo, fault_point="pre_rename")
+        assert rc != 0
+        rc = _run_worker_clean("cp_c1", db_path, repo)
+        assert rc == 0
+        tmp_leftovers = list(repo.glob(".pmi_tmp_*"))
+        assert len(tmp_leftovers) > 0, "BREAK: orphaned .pmi_tmp_* nach Recovery nicht bereinigt"
+
+
+def test_c3_counterproof(tmp_path):
+    """Gegenprobe C3: Authorization außerhalb Transaktion → halbfertiger Datensatz nach Crash."""
+    for _ in range(COUNTERPROOF_RUNS):
+        db_path = tmp_path / f"c3cp_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"c3cp_{uuid.uuid4().hex}")
+        rc = _run_worker_clean("cp_c3", db_path, repo)
+        assert rc != 0, "cp_c3 muss mit os._exit(1) enden"
+        conn = sqlite3.connect(str(db_path))
+        auth_count = conn.execute("SELECT COUNT(*) FROM Authorization").fetchone()[0]
+        assert auth_count > 0, "BREAK: halbfertiger Authorization-Datensatz nach Crash vorhanden"
+        conn.close()
+
+
+def test_c4a_counterproof(tmp_path):
+    """Gegenprobe C4a: Cleanup+Rename deaktiviert → manipulierter Inhalt im Commit."""
+    for _ in range(COUNTERPROOF_RUNS):
+        db_path = tmp_path / f"c4acp_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"c4acp_{uuid.uuid4().hex}")
+        rc = _run_worker("adapter_apply", db_path, repo, fault_point="post_rename_pre_commit")
+        assert rc != 0
+        rc = _run_worker_clean("cp_c4a", db_path, repo)
+        assert rc == 0
+        result = subprocess.run(
+            ["git", "show", "HEAD:worker_output.txt"], cwd=repo, capture_output=True, check=True
+        )
+        assert "TAMPERED" in result.stdout.decode(), "BREAK: manipulierter Inhalt im Commit"
+
+
+def test_c6_counterproof(tmp_path):
+    """Gegenprobe C6: HEAD-Prüfung deaktiviert → FAILED trotz geändertem HEAD."""
+    for _ in range(COUNTERPROOF_RUNS):
+        db_path = tmp_path / f"c6cp_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"c6cp_{uuid.uuid4().hex}")
+        rc = _run_worker("adapter_apply", db_path, repo, fault_point="post_start_pre_write")
+        assert rc != 0
+        head_at_crash = _git_head(repo)
+        # Fremder Commit verändert HEAD
+        (repo / "foreign_c6.txt").write_text("foreign")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "foreign-c6cp"], cwd=repo, check=True, capture_output=True)
+        assert _git_head(repo) != head_at_crash
+        rc = _run_worker_clean("cp_c6", db_path, repo)
+        assert rc == 0, "cp_c6 muss FAILED setzen können"
+        conn = sqlite3.connect(str(db_path))
+        status = conn.execute(
+            "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        assert status[0] == "FAILED", "BREAK: FAILED trotz geändertem HEAD akzeptiert"
         conn.close()
