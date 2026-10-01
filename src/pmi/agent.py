@@ -13,7 +13,8 @@ from abc import ABC, abstractmethod
 from pydantic import ValidationError as PydanticValidationError
 
 from pmi.agent_schema import ProposalOutput
-from pmi.db import append_audit, insert_proposal, _canonical_json
+from pmi.agent_store import compute_expected_hash
+from pmi.db import append_audit, insert_proposal
 
 _PROMPT_TEMPLATE_VERSION = "1"
 
@@ -97,10 +98,6 @@ def _sha256_str(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def _sha256_bytes(b: bytes) -> str:
-    return hashlib.sha256(b).hexdigest()
-
-
 def run_agent(
     task: str,
     conn: sqlite3.Connection,
@@ -130,7 +127,7 @@ def run_agent(
 
     validated: ProposalOutput = ProposalOutput.model_validate(parsed)
 
-    validated_output_hash = _sha256_bytes(_canonical_json(validated.model_dump(mode="json")))
+    validated_output_hash = compute_expected_hash(validated)
 
     payload = validated.model_dump(mode="json")
     proposal_id = insert_proposal(conn, payload=payload, proposed_by="agent:llm")

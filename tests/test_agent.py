@@ -3,7 +3,9 @@ import ast
 import hashlib
 import json
 import sqlite3
+import subprocess
 import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -17,7 +19,7 @@ from pmi.agent_schema import (
     Stakeholder,
     Meilenstein,
 )
-from pmi.db import get_db, init_schema, append_audit
+from pmi.db import get_db, init_schema, insert_request, append_audit
 
 
 # ---------------------------------------------------------------------------
@@ -268,31 +270,30 @@ def test_path_traversal_rejected():
 # ---------------------------------------------------------------------------
 
 def test_stored_content_matches_approved_hash():
-    from pmi.agent_store import store_proposal, compute_stored_hash
+    from pmi.agent_store import store_proposal, compute_stored_hash, compute_expected_hash
     output = ProposalOutput.model_validate(_minimal_proposal_dict())
 
     with tempfile.TemporaryDirectory() as tmp:
         repo_path = Path(tmp)
         stored_path = store_proposal(output, projekt_id="proj-hash-test", repo_path=repo_path)
-        # compute_stored_hash liest proposal.json und gibt SHA-256 zurück
+        # Bundle-Hash der gespeicherten Dateien muss mit dem aus dem ProposalOutput übereinstimmen
         stored_hash = compute_stored_hash(stored_path.parent)
-        from pmi.db import _canonical_json
-        expected_hash = hashlib.sha256(_canonical_json(output.model_dump(mode="json"))).hexdigest()
+        expected_hash = compute_expected_hash(output)
         assert stored_hash == expected_hash
 
 
 def test_stored_content_mismatch_detected():
-    from pmi.agent_store import store_proposal, compute_stored_hash
+    """Nachträgliche Änderung der steckbrief.md → Abweichung erkannt."""
+    from pmi.agent_store import store_proposal, compute_stored_hash, compute_expected_hash
     output = ProposalOutput.model_validate(_minimal_proposal_dict())
 
     with tempfile.TemporaryDirectory() as tmp:
         repo_path = Path(tmp)
         stored_path = store_proposal(output, projekt_id="proj-mismatch", repo_path=repo_path)
-        # Nachträgliche Änderung der gespeicherten proposal.json
-        proposal_file = stored_path.parent / "proposal.json"
-        proposal_file.write_bytes(proposal_file.read_bytes() + b"TAMPERED")
-        from pmi.db import _canonical_json
-        expected_hash = hashlib.sha256(_canonical_json(output.model_dump(mode="json"))).hexdigest()
+        # Markdown-Datei nachträglich verändern
+        steckbrief_file = stored_path.parent / "steckbrief.md"
+        steckbrief_file.write_text(steckbrief_file.read_text() + "\nTAMPERED")
+        expected_hash = compute_expected_hash(output)
         stored_hash = compute_stored_hash(stored_path.parent)
         assert stored_hash != expected_hash
 
@@ -334,3 +335,98 @@ def test_i8_no_raw_write_execute():
                             assert kw not in upper, (
                                 f"agent.py enthält rohes execute mit {kw}: {first.value!r}"
                             )
+
+
+# ---------------------------------------------------------------------------
+# Hilfsfunktion für E2E-Tests
+# ---------------------------------------------------------------------------
+
+def _git_head(repo: Path) -> str:
+    return subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo,
+    ).decode().strip()
+
+
+# ---------------------------------------------------------------------------
+# 16. Durchstich-Test: run_agent → approve → begin_execution → store_proposal → APPLIED
+# ---------------------------------------------------------------------------
+
+def test_e2e_agent_proposal_flow(tmp_git_repo, tmp_db_path):
+    """Vollständiger Durchstich für Steckbrief-Proposals durch die PMI-Governance-Kette."""
+    from pmi.approval import approve
+    from pmi.state_machine import begin_execution, transition, ExecutionStatus
+    from pmi.agent import run_agent, FakeLLMProvider
+    from pmi.agent_store import store_proposal, compute_stored_hash, compute_expected_hash
+
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+
+    # 1. Agent generiert Proposal
+    provider = FakeLLMProvider(json.dumps(_minimal_proposal_dict()))
+    proposal_id, output = run_agent(task="E2E-Testaufgabe", conn=conn, provider=provider)
+
+    # 2. ExecutionRequest anlegen
+    payload = output.model_dump(mode="json")
+    head = _git_head(tmp_git_repo)
+    request_id = insert_request(
+        conn, proposal_id=proposal_id, proposal_version=1,
+        payload=payload, expected_revision=head,
+    )
+
+    # 3. Genehmigen
+    auth = approve(conn, request_id, person="alice")
+
+    # 4. Execution starten
+    idem_key = str(uuid.uuid4())
+    execution_id = begin_execution(
+        conn, request_id=request_id, auth_id=auth.id,
+        idempotency_key=idem_key, repo_path=str(tmp_git_repo),
+    )
+    status = conn.execute(
+        "SELECT status FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()["status"]
+    assert status == "STARTED"
+
+    # 5. Proposal ablegen (benötigt STARTED Execution)
+    stored_path = store_proposal(
+        output, projekt_id="proj-e2e-001",
+        repo_path=tmp_git_repo, conn=conn, execution_id=execution_id,
+    )
+    assert stored_path.exists()
+    assert compute_stored_hash(stored_path.parent) == compute_expected_hash(output)
+
+    # 6. APPLIED
+    transition(conn, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
+    final_status = conn.execute(
+        "SELECT status FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()["status"]
+    assert final_status == "APPLIED"
+
+
+# ---------------------------------------------------------------------------
+# 17. store_proposal ohne STARTED-Execution → Ablehnung (wie I6)
+# ---------------------------------------------------------------------------
+
+def test_store_proposal_requires_started_execution():
+    """store_proposal() direkt ohne STARTED-Execution → Ablehnung."""
+    from pmi.agent_store import store_proposal
+    output = ProposalOutput.model_validate(_minimal_proposal_dict())
+    conn = _make_db()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # Nicht-existente execution_id
+        with pytest.raises(ValueError, match="(?i)(started|nicht gefunden|status)"):
+            store_proposal(
+                output, projekt_id="proj-guard", repo_path=Path(tmp),
+                conn=conn, execution_id=str(uuid.uuid4()),
+            )
+
+        # execution_id=None ohne conn → kein Guard, schreibt normal
+        stored = store_proposal(output, projekt_id="proj-noguard", repo_path=Path(tmp))
+        assert stored.exists()
+
+
+# ---------------------------------------------------------------------------
+# Hinweis: create_proposal() ist Altlast (aus altem Stub).
+# Beim nächsten Testumbau gemeinsam mit Mark entfernen.
+# ---------------------------------------------------------------------------

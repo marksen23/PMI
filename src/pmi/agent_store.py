@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sqlite3
 from pathlib import Path
 
 from pmi.agent_schema import ProposalOutput
@@ -83,26 +84,61 @@ def _risikoliste_md(output: ProposalOutput) -> str:
     return "\n".join(lines)
 
 
-def store_proposal(output: ProposalOutput, projekt_id: str, repo_path: Path) -> Path:
-    """
-    Speichert Steckbrief und Risikoliste als Markdown.
+def _bundle_bytes(canonical: bytes, steckbrief_bytes: bytes, risikoliste_bytes: bytes) -> bytes:
+    return canonical + b"\x00" + steckbrief_bytes + b"\x00" + risikoliste_bytes
 
+
+def compute_expected_hash(output: ProposalOutput) -> str:
+    """
+    Bundle-Hash aus ProposalOutput (ohne Dateisystem-Zugriff).
+
+    Stimmt mit compute_stored_hash() überein, wenn die abgelegten Dateien
+    unverändert aus demselben output erzeugt wurden.
+    """
+    canonical = _canonical_json(output.model_dump(mode="json"))
+    sb = _steckbrief_md(output).encode("utf-8")
+    rl = _risikoliste_md(output).encode("utf-8")
+    return hashlib.sha256(_bundle_bytes(canonical, sb, rl)).hexdigest()
+
+
+def store_proposal(
+    output: ProposalOutput,
+    projekt_id: str,
+    repo_path: Path,
+    conn: sqlite3.Connection | None = None,
+    execution_id: str | None = None,
+) -> Path:
+    """
+    Speichert Steckbrief, Risikoliste und proposal.json unter projekte/<projekt_id>/.
+
+    Wenn execution_id angegeben, muss die Execution in STARTED-Status sein (wie I6).
     Der Ablagepfad wird ausschließlich aus projekt_id abgeleitet, nie aus LLM-Ausgabe.
-    Returns: Path zur steckbrief.md (Elternverzeichnis = Projektverzeichnis)
+    Returns: Path zur steckbrief.md (Elternverzeichnis = Projektverzeichnis).
     """
     _validate_projekt_id(projekt_id)
+
+    if execution_id is not None:
+        if conn is None:
+            raise ValueError("conn erforderlich wenn execution_id angegeben")
+        row = conn.execute(
+            "SELECT status FROM Execution WHERE id=?", (execution_id,)
+        ).fetchone()
+        status = row["status"] if row else None
+        if status != "STARTED":
+            raise ValueError(
+                f"Execution {execution_id} ist nicht STARTED (status: {status!r})"
+            )
 
     project_dir = repo_path / "projekte" / projekt_id
     project_dir.mkdir(parents=True, exist_ok=True)
 
     steckbrief_path = project_dir / "steckbrief.md"
     risikoliste_path = project_dir / "risikoliste.md"
+    proposal_json_path = project_dir / "proposal.json"
 
+    canonical = _canonical_json(output.model_dump(mode="json"))
     steckbrief_path.write_text(_steckbrief_md(output), encoding="utf-8")
     risikoliste_path.write_text(_risikoliste_md(output), encoding="utf-8")
-
-    proposal_json_path = project_dir / "proposal.json"
-    canonical = _canonical_json(output.model_dump(mode="json"))
     proposal_json_path.write_bytes(canonical)
 
     return steckbrief_path
@@ -110,10 +146,11 @@ def store_proposal(output: ProposalOutput, projekt_id: str, repo_path: Path) -> 
 
 def compute_stored_hash(project_dir: Path) -> str:
     """
-    Gibt SHA-256(proposal.json) zurück.
+    Bundle-Hash über die drei gespeicherten Dateien (proposal.json + steckbrief.md + risikoliste.md).
 
-    Stimmt mit SHA-256(_canonical_json(output.model_dump(mode='json'))) überein,
-    solange proposal.json unverändert ist.
+    Stimmt mit compute_expected_hash(output) überein, solange keine Datei verändert wurde.
     """
-    proposal_json_path = project_dir / "proposal.json"
-    return hashlib.sha256(proposal_json_path.read_bytes()).hexdigest()
+    canonical = (project_dir / "proposal.json").read_bytes()
+    sb = (project_dir / "steckbrief.md").read_bytes()
+    rl = (project_dir / "risikoliste.md").read_bytes()
+    return hashlib.sha256(_bundle_bytes(canonical, sb, rl)).hexdigest()
