@@ -13,7 +13,7 @@ platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0
 hypothesis profile 'pmi_tests' -> deadline=None, suppress_health_check=(HealthCheck.function_scoped_fixture,)
 rootdir: /home/user/PMI
 plugins: hypothesis-6.168.3, anyio-4.14.1
-collected 31 items
+collected 34 items
 
 tests/test_crash.py::test_c0_crash_before_start_persist PASSED
 tests/test_crash.py::test_c1_crash_before_rename PASSED
@@ -46,26 +46,30 @@ tests/test_invariants.py::test_i8_agent_has_no_access_to_approval_path PASSED
 tests/test_invariants.py::test_i8_calling_create_proposal_creates_no_authorization PASSED
 tests/test_invariants.py::test_cas_revision_conflict PASSED
 tests/test_invariants.py::test_cas_foreign_commit_between_approve_and_apply PASSED
+tests/test_invariants.py::test_canonical_json_key_order_invariant PASSED
+tests/test_invariants.py::test_canonical_json_value_change PASSED
+tests/test_invariants.py::test_canonical_json_nested PASSED
 
-======================== 31 passed in 149.57s (0:02:29) ========================
+======================== 34 passed in 153.69s (0:02:33) ========================
 ```
 
 ---
 
 ## Gegenprobe: Crash-Tests prüfen echtes Verhalten (C0–C6)
 
-Für jeden Crash-Test wurde je eine zentrale Mechanismus-Invariante absichtlich gebrochen
-(RUNS=2 für Geschwindigkeit). Alle 7 Tests gingen dabei rot.
+Nachschärfung K9: Für C0, C1, C3, C4a, C6 wird nicht der Fault-Point entfernt, sondern die
+**Recovery-Logik** gebrochen, die der Test schützen soll. Aktivierung via `PMI_COUNTERPROOF=<id>`
+(Env-Var in der jeweiligen Produktionsdatei). RUNS=2. Alle 7 Tests gingen dabei rot.
 
-| Test | Gebrochener Mechanismus | Erwartetes Rot-Symptom | Ergebnis |
-|------|------------------------|------------------------|---------|
-| C0 `crash_before_start_persist` | `maybe_crash("pre_start_persist")` deaktiviert | `rc != 0` schlägt fehl (Worker crasht nicht) | ROT ✓ |
-| C1 `crash_before_rename` | `maybe_crash("pre_rename")` deaktiviert | `rc != 0` schlägt fehl | ROT ✓ |
+| Test | Gebrochene Recovery-Invariante | Erwartetes Rot-Symptom | Ergebnis |
+|------|-------------------------------|------------------------|---------|
+| C0 `crash_before_start_persist` | `Authorization.used=1` VOR der Transaktion geschrieben (überleben Crash) | `assert used == 0` schlägt fehl; Neustart schlägt fehl | ROT ✓ |
+| C1 `crash_before_rename` | Temp-File-Cleanup (`.pmi_tmp_*`) deaktiviert | Verwaiste Temp-Datei nach Recovery: `assert len(.pmi_tmp_*) == 0` fehlschlägt | ROT ✓ |
 | C2 `crash_after_commit_before_db_ack` | `_find_own_commit()` gibt immer `None` zurück | Retry erkennt eigenen Commit nicht → Status bleibt STARTED | ROT ✓ |
-| C3 `crash_mid_authorization` | `maybe_crash("mid_authorization")` deaktiviert | `rc != 0` schlägt fehl | ROT ✓ |
-| C4a `crash_after_rename_before_commit` | `maybe_crash("post_rename_pre_commit")` deaktiviert | `rc != 0` schlägt fehl | ROT ✓ |
+| C3 `crash_mid_authorization` | Authorization-Datensatz ohne Signatur außerhalb Transaktion geschrieben, dann Crash | Halbfertiger Datensatz: `assert auth_count == 0` schlägt fehl | ROT ✓ |
+| C4a `crash_after_rename_before_commit` | `_cleanup_leftover` + Rename deaktiviert; Zieldatei vor Retry manipuliert | Manipulierter Inhalt im Commit: `"TAMPERED" in git show HEAD:worker_output.txt` | ROT ✓ |
 | C5 `divergent_on_foreign_commit` | Dateiinhalt-Vergleich in `reconcile_applied_executions()` deaktiviert | Status bleibt APPLIED statt DIVERGENT/ESCALATED | ROT ✓ |
-| C6 `crash_post_start_pre_write` | `maybe_crash("post_start_pre_write")` deaktiviert | `rc != 0` schlägt fehl | ROT ✓ |
+| C6 `crash_post_start_pre_write` | HEAD-Prüfung in `transition(FAILED)` deaktiviert | FAILED mit geändertem HEAD: `assert git_head == head_at_request` schlägt fehl | ROT ✓ |
 
 ---
 

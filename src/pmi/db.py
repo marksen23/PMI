@@ -5,9 +5,6 @@ import sqlite3
 import uuid
 from pathlib import Path
 
-import config
-
-
 def get_db(path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.execute("PRAGMA journal_mode=WAL")
@@ -77,11 +74,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
 
 
 def _canonical_json(payload: dict) -> bytes:
-    return json.dumps(
-        payload,
-        sort_keys=config.CANONICAL_JSON_SORT_KEYS,
-        separators=config.CANONICAL_JSON_SEPARATORS,
-    ).encode()
+    """Kanonisches JSON: sortierte Schlüssel, kein Whitespace, UTF-8. Feste Serialisierung."""
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def compute_request_hash(payload: dict, expected_revision: str = "") -> str:

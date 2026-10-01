@@ -1,6 +1,7 @@
 """Zustandsmaschine + Übergänge für PMI Governance-Kernel."""
 import hashlib
 import hmac
+import os
 import sqlite3
 import uuid
 from enum import Enum
@@ -84,6 +85,13 @@ def begin_execution(
     # expected_revision stammt aus dem ExecutionRequest (festgelegt bei Request-Erstellung)
     initial_revision = auth_row["expected_revision"] or None
 
+    # C0-Gegenprobe: Authorization als verbraucht markieren VOR der Transaktion → überlebt Crash.
+    # Aktiviert mit PMI_COUNTERPROOF=c0; nur für Verifikation der Gegenprobe.
+    if os.environ.get("PMI_COUNTERPROOF") == "c0":
+        conn.execute("UPDATE Authorization SET used=1 WHERE id=?", (auth_id,))
+        conn.commit()
+        os._exit(1)
+
     conn.execute("BEGIN")
     try:
         conn.execute("UPDATE Authorization SET used=1 WHERE id=?", (auth_id,))
@@ -131,8 +139,9 @@ def transition(
     if to_state == ExecutionStatus.FAILED:
         if not zero_effect_proof:
             raise TransitionError("FAILED erfordert zero_effect_proof")
-        # Prüfe ob HEAD noch dem Anfangszustand entspricht (I3)
-        if row["repo_path"] and row["expected_revision"]:
+        # Prüfe ob HEAD noch dem Anfangszustand entspricht (I3).
+        # C6-Gegenprobe: Prüfung deaktiviert mit PMI_COUNTERPROOF=c6.
+        if row["repo_path"] and row["expected_revision"] and os.environ.get("PMI_COUNTERPROOF") != "c6":
             import subprocess as _sp
             result = _sp.run(
                 ["git", "rev-parse", "HEAD"],

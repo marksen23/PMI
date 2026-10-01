@@ -1,5 +1,6 @@
 """Atomarer Git-Write mit CAS und Idempotenz."""
 import json
+import os
 import sqlite3
 import subprocess
 import tempfile
@@ -98,7 +99,15 @@ class GitProjectStoreAdapter:
             return ApplyResult.REVISION_CONFLICT
 
         # Reconciliation: war eine temp-Datei vorhanden (post_rename_pre_commit)?
-        self._cleanup_leftover(payload, idempotency_key)
+        # C4a-Gegenprobe: deaktiviert mit PMI_COUNTERPROOF=c4a.
+        if os.environ.get("PMI_COUNTERPROOF") != "c4a":
+            self._cleanup_leftover(payload, idempotency_key)
+
+        # Verwaiste Temp-Dateien aus früheren Crashes bereinigen.
+        # C1-Gegenprobe: deaktiviert mit PMI_COUNTERPROOF=c1.
+        if os.environ.get("PMI_COUNTERPROOF") != "c1":
+            for leftover_tmp in self.repo_path.glob(".pmi_tmp_*"):
+                leftover_tmp.unlink(missing_ok=True)
 
         # Temp-Datei schreiben
         target_path = self.repo_path / str(payload.get("path", "output.txt"))
@@ -118,8 +127,12 @@ class GitProjectStoreAdapter:
 
         maybe_crash("pre_rename")
 
-        # Atomares Rename
-        tmp_path.rename(target_path)
+        # Atomares Rename.
+        # C4a-Gegenprobe: Rename übersprungen, damit manipulierter Inhalt (target) committet wird.
+        if os.environ.get("PMI_COUNTERPROOF") != "c4a":
+            tmp_path.rename(target_path)
+        else:
+            tmp_path.unlink(missing_ok=True)
 
         maybe_crash("post_rename_pre_commit")
 

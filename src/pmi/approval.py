@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import json
+import os
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -49,6 +50,18 @@ def approve(
     signature = _compute_signature(request_hash, decided_by)
 
     auth_id = str(uuid.uuid4())
+
+    # C3-Gegenprobe: Datensatz ohne gültige Signatur außerhalb einer Transaktion schreiben,
+    # dann crashen → halbfertiger Datensatz überlebt. Aktiviert mit PMI_COUNTERPROOF=c3.
+    if os.environ.get("PMI_COUNTERPROOF") == "c3":
+        conn.execute(
+            "INSERT INTO Authorization (id, request_id, decided_by, expires_at, used, signature) "
+            "VALUES (?, ?, ?, datetime('now', ? || ' seconds'), 0, '')",
+            (auth_id, request_id, decided_by, str(ttl)),
+        )
+        conn.commit()
+        os._exit(1)
+
     maybe_crash("mid_authorization")
     conn.execute(
         "INSERT INTO Authorization (id, request_id, decided_by, expires_at, used, signature) "

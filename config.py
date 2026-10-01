@@ -1,9 +1,6 @@
 # Offene Entscheidungen (Skizze Abschnitt 12) – alle als PROVISIONAL markiert.
 # Keine dieser Konstanten darf ohne explizite Freigabe von Mark geändert werden.
 
-CANONICAL_JSON_SORT_KEYS: bool = True  # PROVISIONAL
-CANONICAL_JSON_SEPARATORS: tuple[str, str] = (",", ":")  # PROVISIONAL
-
 AUTHORIZATION_TTL_SECONDS: int = 86400  # PROVISIONAL – 24 Stunden
 
 MAX_PROPOSAL_VERSIONS: int | None = None  # PROVISIONAL – unbegrenzt

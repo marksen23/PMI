@@ -576,3 +576,30 @@ def test_cas_foreign_commit_between_approve_and_apply(tmp_db_path, tmp_git_repo)
         ["git", "rev-list", "--count", "HEAD"], cwd=tmp_git_repo
     ).decode().strip())
     assert commits_after == commits_before, "Kein Commit bei REVISION_CONFLICT"
+
+
+# ── Kanonisches JSON ──────────────────────────────────────────────────────────
+
+
+def test_canonical_json_key_order_invariant(tmp_db_path):
+    """Gleicher Inhalt mit anderer Schlüsselreihenfolge → identischer request_hash."""
+    from pmi.db import compute_request_hash
+    h1 = compute_request_hash({"b": 2, "a": 1})
+    h2 = compute_request_hash({"a": 1, "b": 2})
+    assert h1 == h2, "Schlüsselreihenfolge darf den Hash nicht beeinflussen"
+
+
+def test_canonical_json_value_change(tmp_db_path):
+    """Geänderter Wert → anderer request_hash."""
+    from pmi.db import compute_request_hash
+    h1 = compute_request_hash({"a": 1})
+    h2 = compute_request_hash({"a": 2})
+    assert h1 != h2, "Werteänderung muss den Hash ändern"
+
+
+def test_canonical_json_nested(tmp_db_path):
+    """Verschachteltes Dict: gleicher Inhalt → gleicher Hash."""
+    from pmi.db import compute_request_hash
+    h1 = compute_request_hash({"z": {"b": 1, "a": 2}, "y": [3, 4]})
+    h2 = compute_request_hash({"y": [3, 4], "z": {"a": 2, "b": 1}})
+    assert h1 == h2

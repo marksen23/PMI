@@ -19,6 +19,7 @@ import pytest
 
 WORKER = Path(__file__).parent / "worker_crash.py"
 RUNS = 50
+COUNTERPROOF_RUNS = 2  # Gegenproben mit RUNS=2 für Geschwindigkeit
 
 
 def _git_head(repo: Path) -> str:
@@ -47,6 +48,19 @@ def _run_worker(scenario: str, db_path: Path, repo_path: Path, fault_point: str)
 def _run_worker_clean(scenario: str, db_path: Path, repo_path: Path) -> int:
     env = os.environ.copy()
     env.pop("PMI_FAULT_INJECT", None)
+    env.pop("PMI_COUNTERPROOF", None)
+    result = subprocess.run(
+        [sys.executable, str(WORKER), scenario, str(db_path), str(repo_path)],
+        env=env,
+    )
+    return result.returncode
+
+
+def _run_worker_counterproof(scenario: str, db_path: Path, repo_path: Path, break_id: str) -> int:
+    """Worker mit aktivierter Recovery-Logik-Unterbrechung (PMI_COUNTERPROOF=<break_id>)."""
+    env = os.environ.copy()
+    env.pop("PMI_FAULT_INJECT", None)
+    env["PMI_COUNTERPROOF"] = break_id
     result = subprocess.run(
         [sys.executable, str(WORKER), scenario, str(db_path), str(repo_path)],
         env=env,
@@ -108,7 +122,8 @@ def test_c0_crash_before_start_persist(tmp_path):
             "SELECT used FROM Authorization LIMIT 1"
         ).fetchone()
         if used is not None:
-            assert used[0] == 0, "Authorization muss nach Crash unverbraucht sein"
+            # Invariante: Authorization darf nicht verbraucht sein ohne zugehörige Execution
+            assert used[0] == 0, "Authorization muss nach Crash unverbraucht sein (Atomizitäts-Invariante)"
         conn.close()
 
         # Neustart ohne Fault-Injection → normaler Ablauf
@@ -140,6 +155,10 @@ def test_c1_crash_before_rename(tmp_path):
         rc_clean = _run_worker_clean("adapter_apply", db_path, repo)
         assert rc_clean == 0
         assert _commit_count(repo) == commits_before + 1
+
+        # Invariante: kein verwaister .pmi_tmp_*-Rest nach Recovery
+        tmp_leftovers = list(repo.glob(".pmi_tmp_*"))
+        assert len(tmp_leftovers) == 0, f"Orphaned temp files nach C1-Recovery: {tmp_leftovers}"
 
 
 # ── C2 – Crash nach Commit, vor DB-Ack ───────────────────────────────────────
@@ -240,6 +259,12 @@ def test_c4a_crash_after_rename_before_commit(tmp_path):
         assert status[0] == "APPLIED"
         conn.close()
 
+        # Invariante: kein unversionierter Rest nach Recovery (git status sauber)
+        result = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=repo, capture_output=True, check=True,
+        )
+        assert result.stdout.decode().strip() == "", "git status muss nach C4a-Recovery sauber sein"
+
 
 # ── C5 – DIVERGENT bei manipulierter Zieldatei (reconcile_applied_executions) ─
 
@@ -320,6 +345,8 @@ def test_c6_crash_post_start_pre_write(tmp_path):
         # Kein Commit (nichts wurde geschrieben)
         assert _commit_count(repo) == commits_before
 
+        head_at_request = _git_head(repo)
+
         # Reconciliation: Null-Effekt → Retry oder FAILED mit Nachweis
         rc_clean = _run_worker_clean("adapter_apply", db_path, repo)
         assert rc_clean == 0
@@ -337,4 +364,8 @@ def test_c6_crash_post_start_pre_write(tmp_path):
                 "SELECT zero_effect_proof FROM Execution ORDER BY started_at DESC LIMIT 1"
             ).fetchone()[0]
             assert proof, "FAILED muss zero_effect_proof enthalten"
+            # Invariante: FAILED nur gültig wenn HEAD unverändert (kein fremder Commit)
+            assert _git_head(repo) == head_at_request, (
+                "FAILED ist nur gültig wenn HEAD seit Request-Erstellung unverändert ist"
+            )
         conn.close()

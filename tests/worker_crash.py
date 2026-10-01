@@ -115,11 +115,29 @@ def scenario_reconcile(db_path: str, repo_path: str) -> None:
     adapter.reconcile_applied_executions()
 
 
+def scenario_c6_fail_attempt(db_path: str, repo_path: str) -> None:
+    """C6-Gegenprobe: versucht FAILED mit zero_effect_proof zu setzen.
+    Schlägt fehl wenn HEAD sich geändert hat (ohne Break); ohne HEAD-Prüfung (C6-Break) → FAILED gesetzt."""
+    from pmi.db import get_db, init_schema
+    from pmi.state_machine import ExecutionStatus, transition
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    existing = conn.execute(
+        "SELECT id FROM Execution WHERE status='STARTED' ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if existing is None:
+        raise RuntimeError("Kein STARTED-Datensatz gefunden")
+    transition(conn, execution_id=existing["id"], to_state=ExecutionStatus.FAILED,
+               zero_effect_proof="kein-Schreibvorgang-Gegenprobe")
+
+
 SCENARIOS = {
     "begin_execution": scenario_begin_execution,
     "adapter_apply": scenario_adapter_apply,
     "authorization": scenario_authorization,
     "reconcile": scenario_reconcile,
+    "c6_fail_attempt": scenario_c6_fail_attempt,
 }
 
 
