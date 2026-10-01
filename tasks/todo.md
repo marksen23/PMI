@@ -228,3 +228,195 @@ Reihenfolge: db → risk → git_adapter → state_machine → agent → approva
 - [x] Implementierung abgeschlossen (30 Tests, alle grün)
 - [x] Alle Tests grün
 - [x] Abschlussbericht erstellt
+
+---
+
+# Auftrag 2 – Temporal-Einbindung (Haltepunkt 1: Plan)
+
+Stand: 2026-10-01
+Voraussetzung: Auftrag 1 grün. Geprüft an `4c4d0bf`: Suite 67 passed.
+Dieser Abschnitt ist der Plan. Keine Tests, keine Implementierung, bis er freigegeben ist.
+
+Auftrag 3 und 4 starten nicht. Auftrag 3: Anbieter/Modell und Datenschutzrahmen fehlen.
+Auftrag 4: Projektauswahl, Raster, Zuordnungsregeln und Originale fehlen.
+
+## Was die Skizze nicht enthält
+
+`docs/Prototyp-Skizze-Phase1.md` beginnt bei Abschnitt 3. Abschnitt 2 (InitiationWorkflow)
+liegt nicht im Repo. Abschnitt 11 nennt Temporal ausdrücklich als nicht Teil von Phase 1.
+Der Ablauf unten folgt dem Auftragstext plus dem bestehenden Kern (Abschnitte 3–8).
+Er ist der Vorschlag, der freizugeben oder zu korrigieren ist. Kein zweites Spezifikationsdokument.
+
+## Kern bleibt unverändert
+
+Geplante Implementierung editiert diese Dateien nicht:
+
+`src/pmi/db.py`, `approval.py`, `state_machine.py`, `git_adapter.py`, `agent.py`,
+`agent_store.py`, `agent_schema.py`, `risk.py`, `cli.py`, `fault_inject.py`, `config.py`.
+
+Auftrag-1-Tests bleiben bytegleich und müssen weiter grün sein.
+
+Zwei Lücken im Kern, die der Wrapper auffängt. Eine Korrektur im Kern nur nach
+gesonderter Freigabe:
+
+1. `begin_execution` lädt die Authorization nur über `a.id` und schreibt danach
+   `ExecutionRequest` mit der übergebenen `request_id`. Eine gültige Authorization
+   eines anderen Requests könnte damit diesen Request verbrauchen. Die Activity
+   lehnt ab, wenn `Authorization.request_id` nicht der Request dieses Workflows ist,
+   und ruft `begin_execution` dann nicht auf.
+2. `insert_request` legt bei jedem Aufruf eine neue Zeile an. `begin_execution` wirft
+   bei bereits verbrauchtem Request, statt die bestehende Execution zurückzugeben.
+   Die Activities machen das idempotent: vor dem Insert nach vorhandenem Request
+   suchen (proposal_id, proposal_version, request_hash, expected_revision); vor
+   `begin_execution` eine vorhandene Execution mit demselben Idempotenzschlüssel
+   zurückgeben. Schlüssel ist die Workflow-ID, kein neuer Zufallswert im Retry.
+
+## Ablauf InitiationWorkflow
+
+Workflow-Code deterministisch: kein SQLite, kein Git, kein `datetime.now`, kein `uuid`,
+kein Lesen von Umgebungsvariablen. IDs und Uhrzeit für Wartefristen kommen aus
+`workflow.info()` und `workflow.wait_condition`. Seiteneffekte nur in Activities.
+
+Eingabe: `task`, `db_path`, `repo_path`, `approval_timeout_seconds`.
+Der Timeout wird beim Start übergeben (im History festgehalten), nicht live aus `config.py` gelesen.
+
+```
+1. draft_proposal(task)
+     Stub. Festes, schemakonformes Steckbrief-Payload, proposed_by="agent:stub".
+     Schreibt Proposal über insert_proposal und ein Audit-Ereignis.
+     offene_fragen ist leer. Kein LLM, kein Netz.
+2. answers-Signal ist registriert.
+     Warten nur, wenn offene_fragen nicht leer ist (im Stub-Lauf also nicht).
+     Payload: list[str]. Keine Authorization, kein Status.
+     Persistenz in diesem Auftrag: nur append_audit.
+     Keine neue Proposal-Version (das wäre K4 und ein Kern-Thema).
+3. create_request
+     Activity liest git HEAD, ruft insert_request. Idempotent wie oben.
+4. Warten auf Signal authorized(authorization_id: str) oder Timeout.
+     Das Signal ist nur die ID. Kein decided_by, kein Hash, kein Payload.
+5. Timeout zuerst → append_audit(EXPIRED), Ergebnis EXPIRED.
+     Keine Execution, kein Commit.
+6. Signal zuerst → begin_execution-Activity:
+     Prüft in der Kontroll-DB: existiert, gehört zu diesem Request, HMAC gültig,
+     nicht benutzt, nicht abgelaufen (SQLite datetime('now')).
+     Fremd oder verbraucht → Audit, Ergebnis REJECTED, kein apply.
+     Sonst begin_execution.
+7. apply_write → adapter.apply mit dem Idempotenzschlüssel der Workflow-ID.
+     REVISION_CONFLICT → Stopp, keine neue Freigabe im Workflow (K1).
+8. verify_write: nur lesen. Bundle-Hash bzw. Zieldatei gegen den freigegebenen Stand.
+     Bei Abweichung reconcile.
+9. reconcile → reconcile_applied_executions.
+10. Ergebnis = Status, den eine Activity aus der Kontroll-DB liest.
+```
+
+EXPIRED ist hier das Ablaufen der Wartefrist im Workflow, nicht ein neuer Execution-Status.
+SQLite `datetime('now')` bewegt sich beim Zeitsprung der Testumgebung nicht.
+Die Activity prüft Ablauf einer schon erteilten Freigabe weiter über die DB.
+Der Zeitsprung-Test prüft die Wartefrist.
+
+## Activities, Timeouts, Retries
+
+Alle Werte PROVISIONAL, zur Freigabe mit diesem Plan.
+Geschäftsfehler (fremde oder verbrauchte Authorization, HASH_MISMATCH, REVISION_CONFLICT,
+abgelaufene Authorization) sind non-retryable. Prozessabbruch ist retryable.
+Backoff jeweils Faktor 2, Startintervall 1 s.
+
+| Activity | start_to_close | maximum_attempts | Begründung |
+|---|---|---|---|
+| draft_proposal | 30 s | 5 | Lokaler Stub, kein Netz. Versuche nur für Prozessabbruch. |
+| create_request | 10 s | 5 | Ein SQLite-Insert, idempotent per Lookup. |
+| begin_execution | 10 s | 5 | Eine DB-Transaktion. Retry darf keine zweite Execution erzeugen. |
+| apply_write | 60 s | 5 | git add/commit. Retry erkennt den eigenen Commit. |
+| verify_write | 30 s | 5 | Nur Lesen von git und Dateien. |
+| reconcile | 30 s | 5 | Statusübergang, idempotent über die Zustandsmaschine. |
+| append_audit | 10 s | 5 | Dedup-Schlüssel, Insert oder No-op. |
+
+Dedup-Schlüssel für Workflow-Audits: `{workflow_id}:{event_type}` ohne Zufall.
+Damit erzeugt ein Activity-Retry kein zweites Audit-Ereignis.
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/temporal/workflow.py     InitiationWorkflow
+src/pmi/temporal/activities.py   Wrapper um den bestehenden Kern, Fault-Hook
+src/pmi/temporal/worker.py       Worker-Start
+tests/test_temporal.py           Neue Tests
+pyproject.toml                   Abhängigkeit temporalio (Version beim Implementieren pinnen)
+```
+
+Abhängigkeit: Python-SDK `temporalio`. Zeitsprung über `WorkflowEnvironment.start_time_skipping()`.
+Kill-Tests über `WorkflowEnvironment.start_local()` und einen Worker-Subprozess.
+Kein Eingriff in den Kern, um den Dev-Server zu starten.
+
+## Tests (Haltepunkt 2, noch nicht geschrieben)
+
+Bestehende Tests unter `tests/` bleiben unverändert und laufen in derselben Suite.
+
+Neue Tests, echte SQLite-DB und echtes git-Repo je Lauf, kein Mock des Kerns:
+
+| Test | Prüfung am Zustand, nicht am Rückgabewert allein |
+|---|---|
+| `test_wait_timeout_expired` | Zeitsprung über die Wartefrist, kein Signal. Keine Execution-Zeile, `Authorization` unverbraucht falls vorhanden, Commit-Anzahl unverändert, genau ein Audit `EXPIRED`, Workflow-Ergebnis `EXPIRED`. |
+| `test_foreign_authorization_rejected` | Signal trägt die ID einer Authorization eines anderen Requests. Keine Execution für diesen Request, dessen Authorization unbenutzt, Commit-Anzahl unverändert. |
+| `test_consumed_authorization_rejected` | Signal trägt eine bereits verbrauchte Authorization-ID. Kein zweiter Commit, keine zweite Execution. |
+| `test_sigkill_*` | Je Activity 50 Läufe, gleicher Fault-Point. Worker-Prozess endet durch `SIGKILL` (`os.kill(pid, SIGKILL)`), keine geworfene Exception. Danach sauberer Neustart des Workers. |
+| `test_status_matches_control_db` | Nach jedem Lauf Workflow-Ergebnis gegen die Kontroll-DB. Abweichung → Test rot. Die DB wird nicht dem Workflow angeglichen. |
+
+Sigkill-Fälle und der Zustand danach:
+
+| Lauf | Fault | Zustand nach Retry |
+|---|---|---|
+| draft_proposal, create_request, verify_write, append_audit | nach der Kernwirkung, vor Activity-Return | genau eine Zeile bzw. ein Audit, Retry erzeugt keine zweite |
+| begin_execution vor Persist | wie C1 | nichts verbraucht, Store unverändert, Retry genau eine Execution |
+| begin_execution nach Persist | wie C1b | Retry erkennt den eigenen Verbrauch, genau eine Execution |
+| apply_write vor Commit | wie C2/C4a | Bereinigung, genau ein Commit |
+| apply_write nach Commit | wie C3 | `ALREADY_APPLIED`, kein zweiter Commit |
+| reconcile | nach dem Übergang, vor Return | ein Übergang, Status `DIVERGENT`/`ESCALATED` nur wenn der Store abweicht |
+| Manipulation nach Apply | wie C4, kein Kill | reconcile setzt `ESCALATED`, Workflow-Ergebnis gleich DB |
+
+Zusätzlich in jedem dieser Läufe: keine doppelten `dedup_key` in `AuditEvent`,
+nie mehr als eine neue Revision, kein `FAILED` ohne `zero_effect_proof`.
+
+`maybe_crash` im Kern bleibt `os._exit(1)`. Der Sigkill-Hook liegt nur in
+`activities.py` und ist nur aktiv, wenn `PMI_FAULT_INJECT` gesetzt ist.
+
+## Checkliste Haltepunkt 2 (vor Implementierung)
+
+Prüfung, ob die Tests scheitern können. Stil ist kein Kriterium.
+
+- Gegen den echten Zustand: Commit-Anzahl, Authorization (`used`, Ablauf, Request-Bindung),
+  Execution-Status, Audit-Kette (`dedup_key`, keine Lücke, kein Duplikat).
+  Ein Test, der nur `APPLIED` vom Workflow entgegennimmt, gilt als nicht bestanden.
+- Negativfall je Invariante, die der Workflow berührt: fremde Authorization, verbrauchte
+  Authorization, abgelaufene Wartefrist, Replay nach Abbruch, Store-Manipulation.
+- K1–K7 bleiben durch die bestehenden Tests abgedeckt. Die neuen Tests dürfen diese
+  Fälle nicht aus der Suite nehmen. K3 zusätzlich: gefälschtes Signal wird nur über
+  die DB-Activity bewertet.
+- C1–C4 und die neuen Kill-Läufe beenden einen Prozess (`SIGKILL` bzw. bestehendes
+  `os._exit`), sie werfen keine Exception als Ersatz.
+- Invarianten- und Absturztests: echte SQLite-DB, echtes git-Repo. Kein Mock von
+  Adapter, Zustandsmaschine oder Approval.
+- Gegenprobe an einer Kopie, nicht am Arbeitsbaum: CAS-Frühreturn in `apply` entfernen.
+  Mindestens ein Test muss rot werden. Wird keiner rot, werden die Tests nicht zur
+  Implementierung vorgelegt. Die Kopie wird verworfen, nicht committet.
+  Neue Workflow-Tests, die vor der Implementierung nur wegen fehlendem Code rot sind,
+  beweisen damit noch nicht, dass sie CAS erkennen. Dieselbe Gegenprobe läuft nach
+  dem ersten grünen Lauf erneut, vor dem Bericht.
+
+## Versionierung von Workflow-Code (Antwort im späteren Bericht)
+
+Vorschlag, mit diesem Plan freizugeben: brechende Änderungen am Workflow bekommen
+einen neuen Typnamen `InitiationWorkflow-vN`. Der Worker registriert den alten Typ,
+bis keine offenen Läufe dieses Typs mehr existieren. `workflow.patched` nur für
+Änderungen, die alte History weiter abspielen können. Laufende Executions werden
+nicht auf neuen Code umgehängt.
+
+## Offene Punkte, die mit der Freigabe dieses Plans entschieden werden
+
+Keine davon ist schon umgesetzt.
+
+1. Abschnitt 2 fehlt. Ist der Ablauf oben der InitiationWorkflow?
+2. EXPIRED = Zeitsprung über die Wartefrist, nicht SQLite-`datetime('now')`.
+3. Request-Bindung der Authorization bleibt im Activity-Wrapper, nicht in `begin_execution`.
+4. `answers` wird nur als Audit gespeichert, keine neue Proposal-Version.
+5. Timeout- und Retry-Tabelle oben.
