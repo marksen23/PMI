@@ -49,7 +49,8 @@ def begin_execution(
 
     auth_row = conn.execute(
         "SELECT a.id, a.request_id, a.decided_by, a.expires_at, a.used, a.signature, "
-        "       er.request_hash, er.consumed_by_execution_id, er.expected_revision "
+        "       a.request_hash AS approved_hash, "
+        "       er.request_hash AS current_hash, er.consumed_by_execution_id, er.expected_revision "
         "FROM Authorization a "
         "JOIN ExecutionRequest er ON er.id = a.request_id "
         "WHERE a.id=?",
@@ -59,7 +60,14 @@ def begin_execution(
     if auth_row is None:
         raise AuthorizationError(f"Authorization {auth_id} nicht gefunden")
 
-    if not _verify_signature(auth_row["request_hash"], auth_row["decided_by"], auth_row["signature"]):
+    if auth_row["request_id"] != request_id:
+        raise AuthorizationError("Authorization gehört zu einem anderen Request")
+
+    approved_hash = auth_row["approved_hash"] or ""
+    if approved_hash != auth_row["current_hash"]:
+        raise AuthorizationError("HASH_MISMATCH: request_hash nach Freigabe geändert")
+
+    if not _verify_signature(approved_hash, auth_row["decided_by"], auth_row["signature"]):
         raise AuthorizationError("HMAC-Signatur ungültig")
 
     expired = conn.execute(
@@ -68,16 +76,22 @@ def begin_execution(
     if expired:
         raise AuthorizationError("Authorization ist abgelaufen")
 
-    if auth_row["used"]:
-        dedup = f"auth_already_used:{auth_id}:{idempotency_key}"
-        append_audit(conn, dedup, "AUTHORIZATION_ALREADY_USED", None, 0, {"auth_id": auth_id})
-        raise AuthorizationError("Authorization wurde bereits verbraucht")
-
     if payload_override is not None:
-        if compute_request_hash(payload_override) != auth_row["request_hash"]:
+        if compute_request_hash(payload_override) != approved_hash:
             raise AuthorizationError("HASH_MISMATCH: Payload nach Freigabe geändert")
 
-    if auth_row["consumed_by_execution_id"]:
+    if auth_row["used"] or auth_row["consumed_by_execution_id"]:
+        existing = conn.execute(
+            "SELECT id FROM Execution "
+            "WHERE idempotency_key=? AND request_id=? AND authorization_id=?",
+            (idempotency_key, request_id, auth_id),
+        ).fetchone()
+        if existing:
+            return existing["id"]
+        if auth_row["used"]:
+            dedup = f"auth_already_used:{auth_id}:{idempotency_key}"
+            append_audit(conn, dedup, "AUTHORIZATION_ALREADY_USED", None, 0, {"auth_id": auth_id})
+            raise AuthorizationError("Authorization wurde bereits verbraucht")
         raise AuthorizationError("ExecutionRequest bereits verbraucht")
 
     execution_id = str(uuid.uuid4())
@@ -108,6 +122,77 @@ def begin_execution(
         raise
 
     return execution_id
+
+
+def fail_revision_conflict(conn: sqlite3.Connection, execution_id: str) -> None:
+    """
+    CAS hat keinen Schreibvorgang zugelassen. Setzt FAILED mit Nachweis.
+
+    transition(FAILED) bleibt bei verändertem HEAD verboten. Diese Funktion
+    schreibt FAILED nur, wenn HEAD abweicht und kein Commit den Idempotenzschlüssel trägt.
+    """
+    row = conn.execute(
+        "SELECT status, repo_path, expected_revision, idempotency_key, zero_effect_proof "
+        "FROM Execution WHERE id=?",
+        (execution_id,),
+    ).fetchone()
+    if row is None:
+        raise TransitionError(f"Execution {execution_id} nicht gefunden")
+    if row["status"] == ExecutionStatus.FAILED.value:
+        if row["zero_effect_proof"]:
+            return
+        raise TransitionError("FAILED ohne zero_effect_proof")
+    if row["status"] != ExecutionStatus.STARTED.value:
+        raise TransitionError(
+            f"REVISION_CONFLICT kann Status {row['status']} nicht auf FAILED setzen"
+        )
+    repo_path = row["repo_path"]
+    if not repo_path:
+        raise TransitionError("REVISION_CONFLICT ohne repo_path: Null-Effekt nicht prüfbar")
+
+    import subprocess as _sp
+
+    head = _sp.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_path,
+        capture_output=True,
+    )
+    if head.returncode != 0:
+        raise TransitionError("git rev-parse fehlgeschlagen")
+    current_head = head.stdout.decode().strip()
+    expected = row["expected_revision"] or ""
+    if current_head == expected:
+        raise TransitionError("kein Revisionskonflikt")
+
+    marker = f"pmi-idempotency-key:{row['idempotency_key']}"
+    log = _sp.run(
+        ["git", "log", "--format=%s", "--all"],
+        cwd=repo_path,
+        capture_output=True,
+    )
+    if log.returncode != 0:
+        raise TransitionError("git log fehlgeschlagen")
+    if any(marker in line for line in log.stdout.decode().splitlines()):
+        raise TransitionError("FAILED verboten: Commit mit Idempotenzschlüssel vorhanden")
+
+    proof = (
+        f"CAS: HEAD {current_head} weicht von expected_revision {expected} ab, "
+        "kein Commit mit Idempotenzschlüssel"
+    )
+    conn.execute(
+        "UPDATE Execution SET status='FAILED', zero_effect_proof=?, finished_at=datetime('now') "
+        "WHERE id=? AND status='STARTED'",
+        (proof, execution_id),
+    )
+    append_audit(
+        conn,
+        f"revision_conflict:{execution_id}",
+        "FAILED",
+        execution_id,
+        0,
+        {"zero_effect_proof": proof},
+    )
+    conn.commit()
 
 
 def transition(

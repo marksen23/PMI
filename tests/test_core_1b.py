@@ -113,7 +113,8 @@ def test_authorization_stores_approved_request_hash(tmp_db_path):
         "UPDATE ExecutionRequest SET request_hash=? WHERE id=?",
         ("tampered-hash", request_id),
     )
-    with pytest.raises(Exception):
+    conn.commit()
+    with pytest.raises(Exception, match="HASH_MISMATCH"):
         begin_execution(
             conn,
             request_id=request_id,

@@ -9,7 +9,12 @@ from enum import Enum
 from pathlib import Path
 
 from pmi.fault_inject import maybe_crash
-from pmi.state_machine import ExecutionStatus, TransitionError, transition
+from pmi.state_machine import (
+    ExecutionStatus,
+    TransitionError,
+    fail_revision_conflict,
+    transition,
+)
 
 
 class ApplyResult(str, Enum):
@@ -158,6 +163,7 @@ class GitProjectStoreAdapter:
         # CAS: HEAD muss expected_revision entsprechen
         current_head = self._current_head()
         if current_head != expected_revision:
+            fail_revision_conflict(self.db, execution_id)
             return ApplyResult.REVISION_CONFLICT
 
         if "steckbrief" in payload:

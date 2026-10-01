@@ -52,9 +52,9 @@ def approve(
 
     maybe_crash("mid_authorization")
     conn.execute(
-        "INSERT INTO Authorization (id, request_id, decided_by, expires_at, used, signature) "
-        "VALUES (?, ?, ?, datetime('now', ? || ' seconds'), 0, ?)",
-        (auth_id, request_id, decided_by, str(ttl), signature),
+        "INSERT INTO Authorization (id, request_id, decided_by, expires_at, used, signature, request_hash) "
+        "VALUES (?, ?, ?, datetime('now', ? || ' seconds'), 0, ?, ?)",
+        (auth_id, request_id, decided_by, str(ttl), signature, request_hash),
     )
     conn.commit()
 

@@ -42,6 +42,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             expires_at  TEXT NOT NULL,
             used        INTEGER NOT NULL DEFAULT 0,
             signature   TEXT NOT NULL,
+            request_hash TEXT NOT NULL DEFAULT '',
             FOREIGN KEY (request_id) REFERENCES ExecutionRequest(id)
         );
 
@@ -70,6 +71,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at   TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
+    columns = [row[1] for row in conn.execute("PRAGMA table_info(Authorization)")]
+    if "request_hash" not in columns:
+        conn.execute(
+            "ALTER TABLE Authorization ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''"
+        )
     conn.commit()
 
 
@@ -114,14 +120,26 @@ def insert_request(
     payload: dict,
     expected_revision: str = "",
 ) -> str:
-    """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD)."""
+    """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD).
+
+    Gleiche proposal_id, proposal_version, request_hash und expected_revision
+    liefern den vorhandenen Request zurück.
+    """
+    revision = expected_revision or ""
+    request_hash = compute_request_hash(payload, revision)
+    existing = conn.execute(
+        "SELECT id FROM ExecutionRequest "
+        "WHERE proposal_id=? AND proposal_version=? AND request_hash=? AND expected_revision=?",
+        (proposal_id, proposal_version, request_hash, revision),
+    ).fetchone()
+    if existing:
+        return existing["id"]
     request_id = str(uuid.uuid4())
-    request_hash = compute_request_hash(payload, expected_revision)
     conn.execute(
         "INSERT INTO ExecutionRequest "
         "(id, proposal_id, proposal_version, request_hash, expected_revision) "
         "VALUES (?, ?, ?, ?, ?)",
-        (request_id, proposal_id, proposal_version, request_hash, expected_revision),
+        (request_id, proposal_id, proposal_version, request_hash, revision),
     )
     conn.commit()
     return request_id
