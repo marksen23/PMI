@@ -84,7 +84,7 @@ def scenario_temporal_begin_execution(db_path: str, repo_path: str) -> None:
         request_id = existing["request_id"]
         auth_row = conn.execute(
             "SELECT id FROM Authorization WHERE request_id=? "
-            "ORDER BY created_at DESC LIMIT 1",
+            "ORDER BY granted_at DESC LIMIT 1",
             (request_id,),
         ).fetchone()
         auth_id = auth_row["id"]
