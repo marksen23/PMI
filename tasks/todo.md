@@ -231,45 +231,73 @@ Reihenfolge: db → risk → git_adapter → state_machine → agent → approva
 
 ---
 
-# Auftrag 2 – Temporal-Einbindung (Haltepunkt 1: Plan)
+# Auftrag 1b – Kernkorrekturen (Haltepunkt 2: Tests rot)
 
 Stand: 2026-10-01
-Voraussetzung: Auftrag 1 grün. Geprüft an `4c4d0bf`: Suite 67 passed.
-Dieser Abschnitt ist der Plan. Keine Tests, keine Implementierung, bis er freigegeben ist.
+Kern-Änderungen für die Punkte unten sind freigegeben. Implementierung erst nach
+Freigabe dieser Tests. Bestehende Testdateien werden nicht geändert.
 
+Die Reparatur im Activity-Wrapper ist verworfen. `begin_execution` und
+`insert_request` erzwingen die Invarianten selbst.
+
+## Tests in tests/test_core_1b.py
+
+| Test | Soll vor der Implementierung | Zustand, den er liest |
+|---|---|---|
+| `test_foreign_authorization_does_not_consume_other_request` | rot | keine Execution, beide Requests unverbraucht, Authorization `used=0`, Commit-Anzahl gleich |
+| `test_authorization_stores_approved_request_hash` | rot | Spalte `Authorization.request_hash` gleich dem Hash bei `approve`; nach Änderung der Request-Zeile keine Execution |
+| `test_insert_request_same_inputs_returns_existing` | rot | gleiche ID, genau eine `ExecutionRequest`-Zeile |
+| `test_begin_execution_retry_returns_same_execution` | rot | gleiche Execution-ID, eine Zeile, ein STARTED-Audit, `used=1` |
+| `test_revision_conflict_fails_with_zero_effect_proof` | rot | `apply` liefert `REVISION_CONFLICT`, Status `FAILED`, `zero_effect_proof` gesetzt, kein weiterer Commit, Zieldatei fehlt |
+| `test_insert_request_different_revision_creates_new` | grün | zwei Requests bei verschiedener `expected_revision` |
+| `test_append_audit_dedup_keeps_one_row` | grün | eine Zeile, erste Sequenz und erstes Payload bleiben |
+
+`transition(FAILED)` bei verändertem HEAD bleibt verboten. Das hält
+`test_i3_hypothesis_no_failed_with_changed_revision` grün. Der CAS-Pfad setzt
+`FAILED` nur, wenn kein Commit mit dem Idempotenzschlüssel existiert. Das ist
+eine eigene Funktion in der Zustandsmaschine, kein gelockerter `transition`.
+
+## Warum es keinen grünen C1b gab
+
+Die Skizze nennt C1b: Crash nach dem Commit von `begin_execution`, Retry erkennt
+den eigenen Verbrauch. Diesen Test gibt es nicht. `test_c0_crash_before_start_persist`
+bricht vor dem Commit ab. Der Neustart legt einen neuen Request und eine neue
+Authorization an und ruft `begin_execution` nicht für denselben Schlüssel auf.
+`scenario_adapter_apply` liest eine vorhandene STARTED-Zeile und überspringt
+`begin_execution`. `test_i1_auth_reuse_rejected` und `test_i7_auth_single_use`
+erwarten beim zweiten Aufruf eine Exception und benutzen einen anderen Schlüssel.
+
+## Implementierung nach Freigabe, noch nicht begonnen
+
+1. `begin_execution`: `Authorization.request_id == request_id`. Gespeicherten
+   `request_hash` gegen den aktuellen Request-Hash prüfen. Bei eigenem
+   Idempotenzschlüssel die bestehende Execution zurückgeben, kein zweites STARTED.
+   Anderer Schlüssel auf verbrauchter Authorization bleibt abgelehnt.
+2. `approve` schreibt `request_hash` in `Authorization`. Spalte ergänzen, mit
+   Default, damit vorhandene INSERT-Listen in den alten Tests weiterlaufen.
+3. `insert_request`: bei gleichem `proposal_id`, `proposal_version`,
+   `request_hash` und `expected_revision` die vorhandene ID zurückgeben.
+4. `apply` bei CAS-Konflikt: Execution `FAILED` mit `zero_effect_proof`, kein Commit.
+5. HMAC nicht ändern. Nur berichten.
+
+---
+
+# Auftrag 2 – Temporal-Einbindung (Plan, nicht gestartet)
+
+Stand: 2026-10-01
+Voraussetzung: Auftrag 1b grün und der Bericht dazu geprüft.
 Auftrag 3 und 4 starten nicht. Auftrag 3: Anbieter/Modell und Datenschutzrahmen fehlen.
 Auftrag 4: Projektauswahl, Raster, Zuordnungsregeln und Originale fehlen.
 
-## Was die Skizze nicht enthält
+## Skizze
 
-`docs/Prototyp-Skizze-Phase1.md` beginnt bei Abschnitt 3. Abschnitt 2 (InitiationWorkflow)
-liegt nicht im Repo. Abschnitt 11 nennt Temporal ausdrücklich als nicht Teil von Phase 1.
-Der Ablauf unten folgt dem Auftragstext plus dem bestehenden Kern (Abschnitte 3–8).
-Er ist der Vorschlag, der freizugeben oder zu korrigieren ist. Kein zweites Spezifikationsdokument.
+Im Repo beginnt `docs/Prototyp-Skizze-Phase1.md` bei Abschnitt 3. Abschnitt 11
+schließt Temporal dort aus. Die Fassung mit Abschnitt 1 und 2 liegt hier nicht.
+Hash-Vergleich erst, wenn diese Fassung als Datei im Repo liegt. Bis dahin kein
+zweiter Spezifikationstext.
 
-## Kern bleibt unverändert
-
-Geplante Implementierung editiert diese Dateien nicht:
-
-`src/pmi/db.py`, `approval.py`, `state_machine.py`, `git_adapter.py`, `agent.py`,
-`agent_store.py`, `agent_schema.py`, `risk.py`, `cli.py`, `fault_inject.py`, `config.py`.
-
-Auftrag-1-Tests bleiben bytegleich und müssen weiter grün sein.
-
-Zwei Lücken im Kern, die der Wrapper auffängt. Eine Korrektur im Kern nur nach
-gesonderter Freigabe:
-
-1. `begin_execution` lädt die Authorization nur über `a.id` und schreibt danach
-   `ExecutionRequest` mit der übergebenen `request_id`. Eine gültige Authorization
-   eines anderen Requests könnte damit diesen Request verbrauchen. Die Activity
-   lehnt ab, wenn `Authorization.request_id` nicht der Request dieses Workflows ist,
-   und ruft `begin_execution` dann nicht auf.
-2. `insert_request` legt bei jedem Aufruf eine neue Zeile an. `begin_execution` wirft
-   bei bereits verbrauchtem Request, statt die bestehende Execution zurückzugeben.
-   Die Activities machen das idempotent: vor dem Insert nach vorhandenem Request
-   suchen (proposal_id, proposal_version, request_hash, expected_revision); vor
-   `begin_execution` eine vorhandene Execution mit demselben Idempotenzschlüssel
-   zurückgeben. Schlüssel ist die Workflow-ID, kein neuer Zufallswert im Retry.
+Der Kern aus Auftrag 1b ist Voraussetzung. Der Workflow ruft ihn auf und wiederholt
+die Prüfungen nicht nebenher.
 
 ## Ablauf InitiationWorkflow
 
@@ -294,25 +322,27 @@ Der Timeout wird beim Start übergeben (im History festgehalten), nicht live aus
      Activity liest git HEAD, ruft insert_request. Idempotent wie oben.
 4. Warten auf Signal authorized(authorization_id: str) oder Timeout.
      Das Signal ist nur die ID. Kein decided_by, kein Hash, kein Payload.
-5. Timeout zuerst → append_audit(EXPIRED), Ergebnis EXPIRED.
-     Keine Execution, kein Commit.
-6. Signal zuerst → begin_execution-Activity:
-     Prüft in der Kontroll-DB: existiert, gehört zu diesem Request, HMAC gültig,
-     nicht benutzt, nicht abgelaufen (SQLite datetime('now')).
-     Fremd oder verbraucht → Audit, Ergebnis REJECTED, kein apply.
-     Sonst begin_execution.
-7. apply_write → adapter.apply mit dem Idempotenzschlüssel der Workflow-ID.
-     REVISION_CONFLICT → Stopp, keine neue Freigabe im Workflow (K1).
+5. Timeout zuerst → Request in der Kontroll-DB terminal, Audit EXPIRED, Ergebnis EXPIRED.
+     Keine Execution, kein Commit. Eine danach erteilte Freigabe kann den Request
+     nicht mehr ausführen. `pmi run` startet oder signalisiert im Temporal-Betrieb
+     den Workflow und ruft den Kern nicht direkt auf.
+6. Signal zuerst → begin_execution im Kern.
+     Der Kern prüft Request-Bindung, gespeicherten Hash, HMAC, Verbrauch, Ablauf.
+     Fremd oder verbraucht → keine Execution, kein Commit.
+7. apply_write → adapter.apply.
+     Idempotenzschlüssel ist der request_hash, nicht die Workflow-ID.
+     REVISION_CONFLICT setzt im Kern FAILED mit zero_effect_proof.
+     Keine neue Freigabe im selben Workflow (K1).
 8. verify_write: nur lesen. Bundle-Hash bzw. Zieldatei gegen den freigegebenen Stand.
      Bei Abweichung reconcile.
 9. reconcile → reconcile_applied_executions.
 10. Ergebnis = Status, den eine Activity aus der Kontroll-DB liest.
 ```
 
-EXPIRED ist hier das Ablaufen der Wartefrist im Workflow, nicht ein neuer Execution-Status.
-SQLite `datetime('now')` bewegt sich beim Zeitsprung der Testumgebung nicht.
-Die Activity prüft Ablauf einer schon erteilten Freigabe weiter über die DB.
-Der Zeitsprung-Test prüft die Wartefrist.
+EXPIRED ist das Ablaufen der Wartefrist. Der Request wird dabei in der DB terminal.
+SQLite `datetime('now')` bewegt sich beim Zeitsprung nicht. Eine schon erteilte
+Freigabe prüft der Kern weiter über die DB. Der Zeitsprung-Test prüft die Wartefrist
+und den terminalen Request.
 
 ## Activities, Timeouts, Retries
 
@@ -331,8 +361,19 @@ Backoff jeweils Faktor 2, Startintervall 1 s.
 | reconcile | 30 s | 5 | Statusübergang, idempotent über die Zustandsmaschine. |
 | append_audit | 10 s | 5 | Dedup-Schlüssel, Insert oder No-op. |
 
-Dedup-Schlüssel für Workflow-Audits: `{workflow_id}:{event_type}` ohne Zufall.
-Damit erzeugt ein Activity-Retry kein zweites Audit-Ereignis.
+Dedup-Schlüssel: `{workflow_id}:{step}:{event_type}`. `step` ist eine feste
+Schrittnummer des Workflows. Nur die Wiederholung desselben Schritts fällt zusammen.
+Ein zweites `answers` oder ein zweiter Übergang bekommt eine andere Schrittnummer.
+
+Produktions-Timeouts stehen in der Tabelle. Tests setzen kürzere `start_to_close`-
+und Heartbeat-Fristen über die Activity-Optionen beim Start, ohne diese Tabelle
+zu ändern. Sonst erkennt Temporal einen SIGKILL erst nach 10–60 s, und 50 Läufe
+je Activity dauern Stunden.
+
+Erschöpfte Retries von `apply_write` enden mit `reconcile`. Kein Workflow endet mit
+einer offenen Execution. `RECOVERY_REQUIRED` gibt es in der Zustandsmaschine nicht
+und wird nicht erfunden. Der Endzustand ist der, den der Kern schreibt (`FAILED`
+mit Nachweis oder `ESCALATED`). Dafür gibt es einen eigenen Test.
 
 ## Dateien (nach Freigabe der Tests)
 
@@ -356,7 +397,8 @@ Neue Tests, echte SQLite-DB und echtes git-Repo je Lauf, kein Mock des Kerns:
 
 | Test | Prüfung am Zustand, nicht am Rückgabewert allein |
 |---|---|
-| `test_wait_timeout_expired` | Zeitsprung über die Wartefrist, kein Signal. Keine Execution-Zeile, `Authorization` unverbraucht falls vorhanden, Commit-Anzahl unverändert, genau ein Audit `EXPIRED`, Workflow-Ergebnis `EXPIRED`. |
+| `test_wait_timeout_expired` | Zeitsprung über die Wartefrist, kein Signal. Keine Execution, Commit-Anzahl unverändert, Request terminal, Audit `EXPIRED`, Workflow-Ergebnis `EXPIRED`. Danach erteilte Authorization führt über die CLI nicht am Workflow vorbei. |
+| `test_apply_retries_exhausted_reconciles` | Fünf Fehlschläge von `apply_write`, danach reconcile. Execution nicht mehr offen. Status in der DB ist `FAILED` oder `ESCALATED`. Workflow-Ergebnis gleich DB. |
 | `test_foreign_authorization_rejected` | Signal trägt die ID einer Authorization eines anderen Requests. Keine Execution für diesen Request, dessen Authorization unbenutzt, Commit-Anzahl unverändert. |
 | `test_consumed_authorization_rejected` | Signal trägt eine bereits verbrauchte Authorization-ID. Kein zweiter Commit, keine zweite Execution. |
 | `test_sigkill_*` | Je Activity 50 Läufe, gleicher Fault-Point. Worker-Prozess endet durch `SIGKILL` (`os.kill(pid, SIGKILL)`), keine geworfene Exception. Danach sauberer Neustart des Workers. |
@@ -411,12 +453,15 @@ bis keine offenen Läufe dieses Typs mehr existieren. `workflow.patched` nur fü
 Änderungen, die alte History weiter abspielen können. Laufende Executions werden
 nicht auf neuen Code umgehängt.
 
-## Offene Punkte, die mit der Freigabe dieses Plans entschieden werden
+## Übernommene Korrekturen am Plan
 
-Keine davon ist schon umgesetzt.
-
-1. Abschnitt 2 fehlt. Ist der Ablauf oben der InitiationWorkflow?
-2. EXPIRED = Zeitsprung über die Wartefrist, nicht SQLite-`datetime('now')`.
-3. Request-Bindung der Authorization bleibt im Activity-Wrapper, nicht in `begin_execution`.
-4. `answers` wird nur als Audit gespeichert, keine neue Proposal-Version.
-5. Timeout- und Retry-Tabelle oben.
+1. Vollständige Skizze fehlt im Repo. Hash-Vergleich erst mit der Datei.
+2. EXPIRED über die Wartefrist, und der Request wird in der DB terminal.
+3. Request-Bindung und K2 liegen in `begin_execution` und `insert_request`, Auftrag 1b.
+4. `answers` nur als Audit, für den Stub.
+5. Timeout-Tabelle gilt für Produktion. Tests überschreiben die Fristen.
+6. `pmi run` führt im Temporal-Betrieb nicht direkt aus.
+7. Dedup-Schlüssel enthält die Schrittnummer.
+8. Idempotenzschlüssel ist der `request_hash`.
+9. REVISION_CONFLICT und erschöpfte `apply_write`-Retries hinterlassen keine offene Execution.
+10. `RECOVERY_REQUIRED` ist kein Zustand im Code und wird nicht ergänzt.

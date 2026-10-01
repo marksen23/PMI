@@ -31,6 +31,14 @@ state_machine nicht erreichbar.
 
 ---
 
+## L5 – Sicherheitsinvariante im Kern, Test muss die Verletzung versuchen (2026-10-01)
+
+Eine Lücke in `begin_execution` oder `insert_request` wird nicht im Temporal-Wrapper
+geschlossen. Jeder andere Aufrufer, auch die CLI, liefe sonst daran vorbei.
+Ein grüner Test, dessen Harness den Kernaufruf beim Retry auslässt, prüft die
+Invariante nicht. Der Test muss den verbotenen Aufruf selbst machen und danach
+Store und Datenbank lesen.
+
 ## L1 – Kein Rebase / Force-Push / Überschreiben ohne Freigabe (2026-10-01)
 
 Bei git-Konflikten oder Divergenz zwischen lokalem Stand und Remote-Branch:
