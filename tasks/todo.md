@@ -225,6 +225,6 @@ Reihenfolge: db → risk → git_adapter → state_machine → agent → approva
 - [x] Haltepunkt 1: Plan freigegeben
 - [x] Projektgerüst aufgebaut (pyproject.toml, config.py, src/pmi/, tests/)
 - [x] Haltepunkt 2: Tests (rot) freigegeben und geschrieben
-- [ ] Implementierung abgeschlossen
-- [ ] Alle Tests grün
-- [ ] Abschlussbericht erstellt
+- [x] Implementierung abgeschlossen (30 Tests, alle grün)
+- [x] Alle Tests grün
+- [x] Abschlussbericht erstellt
