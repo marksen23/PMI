@@ -225,6 +225,16 @@ async def test_wait_timeout_expired(tmp_path, monkeypatch):
     # Keine offene Execution
     assert _open_executions(db_path) == [], "Keine STARTED-Execution nach Timeout"
 
+    # ExecutionRequest muss terminal sein (kein zweiter Start möglich)
+    conn = sqlite3.connect(str(db_path))
+    req = conn.execute(
+        "SELECT status FROM ExecutionRequest ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert req is not None and req[0] == "EXPIRED", (
+        f"ExecutionRequest muss nach Timeout terminal sein, war: {req}"
+    )
+
 
 @pytest.mark.asyncio
 async def test_foreign_authorization_rejected(tmp_path, monkeypatch):
@@ -615,7 +625,7 @@ def test_sigkill_begin_execution_before_persist(tmp_path):
         commits_before = _commit_count(repo)
 
         rc = _run_worker("temporal_begin_execution", db_path, repo, "pre_start_persist")
-        assert rc != 0, "Worker muss mit Fehler enden"
+        assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
         # Kein STARTED-Datensatz
         conn = sqlite3.connect(str(db_path))
@@ -650,7 +660,8 @@ def test_sigkill_begin_execution_after_persist(tmp_path):
         db_path = tmp_path / f"sk_beg_post_{uuid.uuid4().hex}.db"
         repo = _make_repo_sync(tmp_path, f"sk_beg_post_{uuid.uuid4().hex}")
 
-        _run_worker("temporal_begin_execution", db_path, repo, "post_start_persist")
+        rc = _run_worker("temporal_begin_execution", db_path, repo, "post_start_persist")
+        assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
         # Retry
         rc_clean = _run_worker_clean("temporal_begin_execution", db_path, repo)
@@ -674,7 +685,7 @@ def test_sigkill_apply_write_before_commit(tmp_path):
         commits_before = _commit_count(repo)
 
         rc = _run_worker("temporal_apply_write", db_path, repo, "post_rename_pre_commit")
-        assert rc != 0
+        assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
         assert _commit_count(repo) == commits_before
 
@@ -700,7 +711,7 @@ def test_sigkill_apply_write_after_commit(tmp_path):
         commits_before = _commit_count(repo)
 
         rc = _run_worker("temporal_apply_write", db_path, repo, "post_commit")
-        assert rc != 0
+        assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
         assert _commit_count(repo) == commits_before + 1
 
@@ -713,7 +724,7 @@ def test_sigkill_apply_write_after_commit(tmp_path):
             "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
         conn.close()
-        assert status is not None and status[0] in ("APPLIED", "ALREADY_APPLIED")
+        assert status is not None and status[0] == "APPLIED"
         assert _dedup_violations(db_path) == [], "Doppelte dedup_key"
 
 
@@ -740,14 +751,15 @@ def test_sigkill_reconcile_after_divergent(tmp_path):
                 cwd=repo, check=True, capture_output=True,
             )
 
-        _run_worker("temporal_reconcile", db_path, repo, "after_reconcile_transition")
+        rc = _run_worker("temporal_reconcile", db_path, repo, "after_reconcile_transition")
+        assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
         # Retry
         rc_clean = _run_worker_clean("temporal_reconcile", db_path, repo)
         assert rc_clean == 0
 
         db_status = _execution_status(db_path)
-        assert db_status in ("APPLIED", "DIVERGENT", "ESCALATED"), (
-            f"Unerwarteter Status nach Reconcile-Kill + Retry: {db_status}"
+        assert db_status == "ESCALATED", (
+            f"Manipulierte Datei muss ESCALATED ergeben, war: {db_status}"
         )
         assert _dedup_violations(db_path) == [], "Doppelte dedup_key nach Reconcile-Kill"
