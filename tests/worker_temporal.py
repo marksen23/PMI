@@ -13,6 +13,7 @@ Die Activity-Funktionen aus pmi.temporal.activities werden direkt aufgerufen
 (kein Temporal-Server). Fault-Injection via maybe_crash(point) in den Kernel-
 Funktionen oder via PMI_FAULT_INJECT in den Activity-Wrappern selbst.
 """
+import asyncio
 import subprocess
 import sys
 import uuid
@@ -101,7 +102,7 @@ def scenario_temporal_begin_execution(db_path: str, repo_path: str) -> None:
     wf_id = _workflow_id_from(idem_key)
     conn.close()
 
-    activity_begin_execution(BeginExecutionInput(
+    asyncio.run(activity_begin_execution(BeginExecutionInput(
         db_path=db_path,
         repo_path=repo_path,
         request_id=request_id,
@@ -109,7 +110,7 @@ def scenario_temporal_begin_execution(db_path: str, repo_path: str) -> None:
         idempotency_key=idem_key,
         step=6,
         workflow_id=wf_id,
-    ))
+    )))
 
 
 def scenario_temporal_apply_write(db_path: str, repo_path: str) -> None:
@@ -160,7 +161,7 @@ def scenario_temporal_apply_write(db_path: str, repo_path: str) -> None:
     expected_rev = exec_row["expected_revision"] or ""
     conn.close()
 
-    activity_apply_write(ApplyWriteInput(
+    asyncio.run(activity_apply_write(ApplyWriteInput(
         db_path=db_path,
         repo_path=repo_path,
         payload=payload,
@@ -169,7 +170,7 @@ def scenario_temporal_apply_write(db_path: str, repo_path: str) -> None:
         execution_id=execution_id,
         step=7,
         workflow_id=_workflow_id_from(idem_key),
-    ))
+    )))
 
 
 def scenario_temporal_reconcile(db_path: str, repo_path: str) -> None:
@@ -191,12 +192,12 @@ def scenario_temporal_reconcile(db_path: str, repo_path: str) -> None:
     conn.close()
     idem_key = exec_row["idempotency_key"] if exec_row else str(uuid.uuid4())
 
-    activity_reconcile(ReconcileInput(
+    asyncio.run(activity_reconcile(ReconcileInput(
         db_path=db_path,
         repo_path=repo_path,
         step=9,
         workflow_id=_workflow_id_from(idem_key),
-    ))
+    )))
 
 
 SCENARIOS = {

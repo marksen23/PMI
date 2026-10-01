@@ -29,6 +29,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             proposal_version      INTEGER NOT NULL,
             request_hash          TEXT NOT NULL,
             expected_revision     TEXT NOT NULL DEFAULT '',
+            status                TEXT NOT NULL DEFAULT 'OPEN',
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
             consumed_by_execution_id TEXT,
             FOREIGN KEY (proposal_id) REFERENCES Proposal(id)
@@ -71,10 +72,15 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at   TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
-    columns = [row[1] for row in conn.execute("PRAGMA table_info(Authorization)")]
-    if "request_hash" not in columns:
+    auth_columns = [row[1] for row in conn.execute("PRAGMA table_info(Authorization)")]
+    if "request_hash" not in auth_columns:
         conn.execute(
             "ALTER TABLE Authorization ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''"
+        )
+    req_columns = [row[1] for row in conn.execute("PRAGMA table_info(ExecutionRequest)")]
+    if "status" not in req_columns:
+        conn.execute(
+            "ALTER TABLE ExecutionRequest ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'"
         )
     conn.commit()
 

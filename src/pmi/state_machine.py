@@ -121,6 +121,7 @@ def begin_execution(
         conn.execute("ROLLBACK")
         raise
 
+    maybe_crash("post_start_persist")
     return execution_id
 
 
@@ -279,3 +280,6 @@ def transition(
         append_audit(conn, f"escalated:{execution_id}", "ESCALATED", execution_id, 1, {})
 
     conn.commit()
+
+    if to_state == ExecutionStatus.DIVERGENT:
+        maybe_crash("after_reconcile_transition")
