@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import uuid as _uuid
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,7 +12,6 @@ from pmi.db import (
     append_audit,
     get_db,
     init_schema,
-    insert_proposal,
     insert_request,
 )
 from pmi.git_adapter import GitProjectStoreAdapter
@@ -138,15 +138,26 @@ async def activity_draft_proposal(args: DraftProposalInput) -> DraftProposalResu
         conn.close()
         return DraftProposalResult(proposal_id=data["proposal_id"], payload=_stub_payload())
     payload = _stub_payload()
-    proposal_id = insert_proposal(conn, payload, proposed_by="agent:stub")
-    append_audit(
-        conn,
-        dedup_key,
-        "DRAFT_PROPOSAL",
-        None,
-        0,
-        {"proposal_id": proposal_id, "task": args.task},
-    )
+    proposal_id = str(_uuid.uuid4())
+    audit_id = str(_uuid.uuid4())
+    audit_payload = json.dumps({"proposal_id": proposal_id, "task": args.task})
+    # Beide Writes atomar – kein Fenster zwischen Proposal und AuditEvent.
+    conn.execute("BEGIN")
+    try:
+        conn.execute(
+            "INSERT INTO Proposal (id, proposed_by, payload_json) VALUES (?, ?, ?)",
+            (proposal_id, "agent:stub", json.dumps(payload)),
+        )
+        conn.execute(
+            "INSERT INTO AuditEvent "
+            "(id, dedup_key, event_type, execution_id, seq, payload_json) "
+            "VALUES (?, ?, 'DRAFT_PROPOSAL', NULL, 0, ?)",
+            (audit_id, dedup_key, audit_payload),
+        )
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     conn.close()
     return DraftProposalResult(proposal_id=proposal_id, payload=payload)
 
