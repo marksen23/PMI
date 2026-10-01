@@ -1,4 +1,4 @@
-# Plan – Phase 1 Ausführungskern
+# Plan – Sicherheitskern Phase 1 fertig
 
 Stand: 2026-10-01  
 Grundlage: docs/Prototyp-Skizze-Phase1.md + Korrekturen K1–K7

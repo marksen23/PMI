@@ -40,11 +40,16 @@ def begin_execution(
     payload_override: dict | None = None,
     repo_path: str | None = None,
 ) -> str:
+    """
+    Startet eine Execution. expected_revision wird aus dem ExecutionRequest gelesen –
+    der Worker liest HEAD einmalig bei Request-Erstellung, nicht hier.
+    repo_path wird in Execution gespeichert, damit transition(FAILED) HEAD prüfen kann.
+    """
     maybe_crash("pre_start_persist")
 
     auth_row = conn.execute(
         "SELECT a.id, a.request_id, a.decided_by, a.expires_at, a.used, a.signature, "
-        "       er.request_hash, er.consumed_by_execution_id "
+        "       er.request_hash, er.consumed_by_execution_id, er.expected_revision "
         "FROM Authorization a "
         "JOIN ExecutionRequest er ON er.id = a.request_id "
         "WHERE a.id=?",
@@ -76,15 +81,8 @@ def begin_execution(
         raise AuthorizationError("ExecutionRequest bereits verbraucht")
 
     execution_id = str(uuid.uuid4())
-
-    initial_revision = None
-    if repo_path:
-        import subprocess as _sp
-        result = _sp.run(
-            ["git", "rev-parse", "HEAD"], cwd=repo_path, capture_output=True
-        )
-        if result.returncode == 0:
-            initial_revision = result.stdout.decode().strip()
+    # expected_revision stammt aus dem ExecutionRequest (festgelegt bei Request-Erstellung)
+    initial_revision = auth_row["expected_revision"] or None
 
     conn.execute("BEGIN")
     try:
@@ -133,7 +131,7 @@ def transition(
     if to_state == ExecutionStatus.FAILED:
         if not zero_effect_proof:
             raise TransitionError("FAILED erfordert zero_effect_proof")
-        # Wenn ein Repo registriert ist, muss HEAD noch dem Anfangszustand entsprechen (I3)
+        # Prüfe ob HEAD noch dem Anfangszustand entspricht (I3)
         if row["repo_path"] and row["expected_revision"]:
             import subprocess as _sp
             result = _sp.run(
@@ -145,7 +143,7 @@ def transition(
                 current_head = result.stdout.decode().strip()
                 if current_head != row["expected_revision"]:
                     raise TransitionError(
-                        "FAILED verboten: Store-Revision hat sich seit STARTED geändert "
+                        "FAILED verboten: Store-Revision hat sich seit Anfang geändert "
                         f"(erwartet={row['expected_revision']}, aktuell={current_head})"
                     )
 

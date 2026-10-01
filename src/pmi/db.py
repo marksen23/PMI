@@ -31,6 +31,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             proposal_id           TEXT NOT NULL,
             proposal_version      INTEGER NOT NULL,
             request_hash          TEXT NOT NULL,
+            expected_revision     TEXT NOT NULL DEFAULT '',
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
             consumed_by_execution_id TEXT,
             FOREIGN KEY (proposal_id) REFERENCES Proposal(id)
@@ -83,8 +84,11 @@ def _canonical_json(payload: dict) -> bytes:
     ).encode()
 
 
-def compute_request_hash(payload: dict) -> str:
-    return hashlib.sha256(_canonical_json(payload)).hexdigest()
+def compute_request_hash(payload: dict, expected_revision: str = "") -> str:
+    """Hash über Payload + expected_revision – bindet den Request an einen konkreten Store-Stand."""
+    canonical = _canonical_json(payload)
+    rev_bytes = (expected_revision or "").encode()
+    return hashlib.sha256(canonical + b"|" + rev_bytes).hexdigest()
 
 
 def insert_proposal(conn: sqlite3.Connection, payload: dict, proposed_by: str) -> str:
@@ -102,13 +106,16 @@ def insert_request(
     proposal_id: str,
     proposal_version: int,
     payload: dict,
+    expected_revision: str = "",
 ) -> str:
+    """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD)."""
     request_id = str(uuid.uuid4())
-    request_hash = compute_request_hash(payload)
+    request_hash = compute_request_hash(payload, expected_revision)
     conn.execute(
-        "INSERT INTO ExecutionRequest (id, proposal_id, proposal_version, request_hash) "
-        "VALUES (?, ?, ?, ?)",
-        (request_id, proposal_id, proposal_version, request_hash),
+        "INSERT INTO ExecutionRequest "
+        "(id, proposal_id, proposal_version, request_hash, expected_revision) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (request_id, proposal_id, proposal_version, request_hash, expected_revision),
     )
     conn.commit()
     return request_id

@@ -84,17 +84,16 @@ class GitProjectStoreAdapter:
                     pass
                 return ApplyResult.ALREADY_APPLIED
             else:
-                # Eigener Commit da, aber noch ein fremder darüber — DIVERGENT
-                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
-                return ApplyResult.DIVERGENT
-
-        # Fremd-Commit über eigenem PMI-Commit → DIVERGENT (C5)
-        current_head = self._current_head()
-        if self._is_foreign_on_top_of_pmi(current_head):
-            transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
-            return ApplyResult.DIVERGENT
+                # Eigener Commit da, aber noch ein fremder darüber
+                # (eigene Datei könnte unverändert sein – prüft reconcile_applied_executions)
+                try:
+                    transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
+                except TransitionError:
+                    pass
+                return ApplyResult.ALREADY_APPLIED
 
         # CAS: HEAD muss expected_revision entsprechen
+        current_head = self._current_head()
         if current_head != expected_revision:
             return ApplyResult.REVISION_CONFLICT
 
@@ -138,32 +137,62 @@ class GitProjectStoreAdapter:
 
         return ApplyResult.APPLIED
 
-    def _is_pmi_commit(self, sha: str) -> bool:
-        result = self._git("show", "-s", "--format=%s%n%b", sha, check=False)
-        return "pmi-idempotency-key:" in result.stdout.decode()
+    def reconcile_applied_executions(self) -> list[str]:
+        """
+        Prüft alle APPLIED-Executions: ist eigener Commit noch in der Historie
+        und Dateiinhalt unverändert? Bei Abweichung → DIVERGENT → ESCALATED.
+        Normale additive Commits (neue Dateien) lösen kein DIVERGENT aus.
+        """
+        rows = self.db.execute(
+            "SELECT e.id, e.idempotency_key, p.payload_json "
+            "FROM Execution e "
+            "JOIN ExecutionRequest er ON er.id = e.request_id "
+            "JOIN Proposal p ON p.id = er.proposal_id "
+            "WHERE e.status='APPLIED'"
+        ).fetchall()
 
-    def _is_foreign_on_top_of_pmi(self, current_head: str) -> bool:
-        """Erkennt: fremder Commit liegt über einem PMI-Commit (C5 / DIVERGENT)."""
-        if self._is_pmi_commit(current_head):
-            return False  # HEAD ist PMI-Commit → alles in Ordnung
-        # HEAD ist kein PMI-Commit. Gibt es einen PMI-Commit in der Vorfahren-Kette?
-        result = self._git("log", "--format=%H %s %b", check=False)
-        for line in result.stdout.decode().splitlines():
-            if "pmi-idempotency-key:" in line:
-                return True
-        return False
+        diverged = []
+        for row in rows:
+            execution_id = row["id"]
+            idempotency_key = row["idempotency_key"]
+            payload = json.loads(row["payload_json"])
+
+            own_commit = self._find_own_commit(idempotency_key)
+            if own_commit is None:
+                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
+                diverged.append(execution_id)
+                continue
+
+            target_path = self.repo_path / str(payload.get("path", "output.txt"))
+            rel_path = str(target_path.relative_to(self.repo_path))
+
+            # Dateiinhalt aus eigenem Commit holen
+            show_result = self._git("show", f"{own_commit}:{rel_path}", check=False)
+            if show_result.returncode != 0:
+                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
+                diverged.append(execution_id)
+                continue
+
+            if not target_path.exists():
+                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
+                diverged.append(execution_id)
+                continue
+
+            if target_path.read_bytes() != show_result.stdout:
+                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
+                diverged.append(execution_id)
+
+        return diverged
 
     def _cleanup_leftover(self, payload: dict, idempotency_key: str) -> None:
         """Bereinigt hinterlassene umbenannte Datei von post_rename_pre_commit-Crash."""
         target_path = self.repo_path / str(payload.get("path", "output.txt"))
         if not target_path.exists():
             return
-        # Prüfen ob die Datei committed ist
         result = self._git(
             "status", "--porcelain", str(target_path.relative_to(self.repo_path)),
             check=False,
         )
         if result.returncode == 0 and result.stdout.decode().strip():
-            # Datei existiert aber nicht committed → von post_rename_pre_commit
             target_path.unlink()
             self._git("checkout", "--", ".", check=False)

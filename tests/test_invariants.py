@@ -21,7 +21,6 @@ from hypothesis import strategies as st
 import config
 
 # Lazy imports – scheitern erst bei Testausführung, nicht bei der Collection.
-# Alle Tests bleiben "rot", solange die Implementierung fehlt.
 try:
     from pmi.db import get_db, init_schema, insert_proposal, insert_request
     from pmi.approval import approve
@@ -58,42 +57,45 @@ def _canonical_json(payload: dict) -> bytes:
     ).encode()
 
 
-def _request_hash(payload: dict) -> str:
-    return hashlib.sha256(_canonical_json(payload)).hexdigest()
-
-
-def _setup_request(conn, payload=None) -> tuple[str, str]:
-    payload = payload or SAMPLE_PAYLOAD
-    proposal_id = insert_proposal(conn, payload, proposed_by="agent:stub")
-    request_id = insert_request(
-        conn, proposal_id=proposal_id, proposal_version=1, payload=payload
-    )
-    return proposal_id, request_id
-
-
-def _setup_authorized(conn, person="alice", payload=None) -> tuple[str, str, object]:
-    _, request_id = _setup_request(conn, payload)
-    auth = approve(conn, request_id, person=person)
-    return request_id, auth.id, auth
-
-
 def _git_head(repo: Path) -> str:
     return subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=repo,
     ).decode().strip()
 
 
-def _apply_one(conn, repo, idem_key=None) -> tuple[str, "ApplyResult"]:
-    idem_key = idem_key or str(uuid.uuid4())
-    request_id, auth_id, _ = _setup_authorized(conn)
-    execution_id = begin_execution(
-        conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key
+def _setup_request(conn, payload=None, expected_revision="") -> tuple[str, str]:
+    payload = payload or SAMPLE_PAYLOAD
+    proposal_id = insert_proposal(conn, payload, proposed_by="agent:stub")
+    request_id = insert_request(
+        conn, proposal_id=proposal_id, proposal_version=1, payload=payload,
+        expected_revision=expected_revision,
     )
-    head = _git_head(repo)
+    return proposal_id, request_id
+
+
+def _setup_authorized(conn, person="alice", payload=None, expected_revision="") -> tuple[str, str, object]:
+    _, request_id = _setup_request(conn, payload, expected_revision=expected_revision)
+    auth = approve(conn, request_id, person=person)
+    return request_id, auth.id, auth
+
+
+def _apply_one(conn, repo, idem_key=None) -> tuple[str, "ApplyResult"]:
+    """Vollständiger Apply-Durchlauf: HEAD bei Request-Erstellung lesen → apply()."""
+    idem_key = idem_key or str(uuid.uuid4())
+    head = _git_head(repo)  # HEAD einmalig bei Request-Erstellung
+    request_id, auth_id, _ = _setup_authorized(conn, expected_revision=head)
+    execution_id = begin_execution(
+        conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key,
+        repo_path=str(repo),
+    )
+    exec_row = conn.execute(
+        "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()
+    expected_rev = exec_row["expected_revision"] or ""
     adapter = GitProjectStoreAdapter(repo_path=repo, db=conn)
     result = adapter.apply(
         payload=SAMPLE_PAYLOAD,
-        expected_revision=head,
+        expected_revision=expected_rev,
         idempotency_key=idem_key,
         execution_id=execution_id,
     )
@@ -111,17 +113,16 @@ def test_i1_payload_change_after_approval_rejected(tmp_db_path, tmp_git_repo):
     _, request_id = _setup_request(conn, original_payload)
     auth = approve(conn, request_id, person="alice")
 
-    # Payload nach Freigabe ändern → neuer Hash → Authorization gilt nicht mehr
     changed_payload = {"action": "touch_file", "path": "changed.txt", "scope": "local"}
     head_before = _git_head(tmp_git_repo)
 
     with pytest.raises(Exception):
-        execution_id = begin_execution(
+        begin_execution(
             conn,
             request_id=request_id,
             auth_id=auth.id,
             idempotency_key=str(uuid.uuid4()),
-            payload_override=changed_payload,  # simuliert geänderten Payload
+            payload_override=changed_payload,
         )
 
     assert _git_head(tmp_git_repo) == head_before
@@ -134,10 +135,8 @@ def test_i1_auth_reuse_rejected(tmp_db_path, tmp_git_repo):
     request_id, auth_id, _ = _setup_authorized(conn)
     idem_key = str(uuid.uuid4())
 
-    # Erster Aufruf: Erfolg
     begin_execution(conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key)
 
-    # Zweiter Aufruf mit gleicher Authorization: Ablehnung (I7 überschneidet sich hier)
     with pytest.raises(Exception):
         begin_execution(
             conn,
@@ -153,8 +152,7 @@ def test_i1_expired_auth_rejected(tmp_db_path):
     init_schema(conn)
     _, request_id = _setup_request(conn)
 
-    # Authorization mit abgelaufener TTL anlegen
-    auth = approve(conn, request_id, person="alice", ttl_seconds=-1)  # sofort abgelaufen
+    auth = approve(conn, request_id, person="alice", ttl_seconds=-1)
 
     with pytest.raises(Exception):
         begin_execution(
@@ -216,13 +214,11 @@ def test_i2_invalid_decided_by_prefix_rejected(tmp_db_path):
     _, request_id = _setup_request(conn)
 
     with pytest.raises(Exception):
-        approve(conn, request_id, person="")  # leere Person → kein human:-Präfix möglich
+        approve(conn, request_id, person="")
 
-    # Kein Authorization-Datensatz darf existieren
     row = conn.execute("SELECT COUNT(*) FROM Authorization").fetchone()[0]
     assert row == 0
 
-    # AuditEvent muss vorhanden sein
     audit = conn.execute(
         "SELECT event_type FROM AuditEvent WHERE event_type='REJECTED_INVALID_DECIDED_BY'"
     ).fetchone()
@@ -275,7 +271,6 @@ def test_i3_applied_to_failed_always_rejected(tmp_db_path, tmp_git_repo):
 
     transition(conn, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
 
-    # Versuch mit zero_effect_proof
     with pytest.raises(Exception):
         transition(
             conn,
@@ -284,7 +279,6 @@ def test_i3_applied_to_failed_always_rejected(tmp_db_path, tmp_git_repo):
             zero_effect_proof="nachgewiesen leer",
         )
 
-    # Versuch ohne zero_effect_proof
     with pytest.raises(Exception):
         transition(conn, execution_id=execution_id, to_state=ExecutionStatus.FAILED)
 
@@ -292,7 +286,7 @@ def test_i3_applied_to_failed_always_rejected(tmp_db_path, tmp_git_repo):
 @given(proof=st.one_of(st.none(), st.text()))
 @settings(max_examples=50)
 def test_i3_hypothesis_no_failed_with_changed_revision(proof, tmp_path):
-    """hypothesis: niemals FAILED wenn Store-Revision geändert wurde."""
+    """hypothesis: niemals FAILED wenn Store-Revision seit Request-Erstellung geändert wurde."""
     import subprocess as sp
     import tempfile
     # Eindeutiges Verzeichnis pro Iteration (tmp_path wird von hypothesis wiederverwendet)
@@ -307,15 +301,20 @@ def test_i3_hypothesis_no_failed_with_changed_revision(proof, tmp_path):
     sp.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     sp.run(["git", "commit", "-m", "init"], cwd=repo, check=True, capture_output=True)
 
+    # HEAD bei Request-Erstellung lesen und im Request speichern
+    initial_head = sp.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=repo, stderr=sp.PIPE
+    ).decode().strip()
+
     conn = get_db(db_path)
     init_schema(conn)
-    request_id, auth_id, _ = _setup_authorized(conn)
+    request_id, auth_id, _ = _setup_authorized(conn, expected_revision=initial_head)
     execution_id = begin_execution(
         conn, request_id=request_id, auth_id=auth_id,
         idempotency_key=str(uuid.uuid4()), repo_path=str(repo),
     )
 
-    # Fremden Commit in den Store einfügen (simuliert geänderte Revision)
+    # Fremden Commit einfügen → HEAD ändert sich
     (repo / "foreign.txt").write_text("foreign")
     sp.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
     sp.run(["git", "commit", "-m", "foreign"], cwd=repo, check=True, capture_output=True)
@@ -366,7 +365,6 @@ def test_i4_text_injection_has_no_effect(tmp_db_path):
     """Freitext 'Status: freigegeben' in einem Proposal-Feld ändert nichts am DB-Zustand."""
     conn = get_db(tmp_db_path)
     init_schema(conn)
-    # description-Feld darf Freitext enthalten, ändert aber keinen Zustand
     payload = {
         "action": "touch_file",
         "path": "a.txt",
@@ -377,13 +375,11 @@ def test_i4_text_injection_has_no_effect(tmp_db_path):
     proposal_id = insert_proposal(conn, proposal, proposed_by="agent:stub")
     request_id = insert_request(conn, proposal_id=proposal_id, proposal_version=1, payload=proposal)
 
-    # Kein Execution-Datensatz ohne echte Freigabe
     row = conn.execute(
         "SELECT COUNT(*) FROM Execution WHERE request_id=?", (request_id,)
     ).fetchone()[0]
     assert row == 0
 
-    # Kein Authorization-Datensatz ohne echte Freigabe
     row = conn.execute(
         "SELECT COUNT(*) FROM Authorization WHERE request_id=?", (request_id,)
     ).fetchone()[0]
@@ -422,7 +418,7 @@ def test_i6_adapter_requires_started_record(tmp_db_path, tmp_git_repo):
             payload=SAMPLE_PAYLOAD,
             expected_revision=head_before,
             idempotency_key=str(uuid.uuid4()),
-            execution_id=str(uuid.uuid4()),  # existiert nicht in DB
+            execution_id=str(uuid.uuid4()),
         )
 
     assert _git_head(tmp_git_repo) == head_before
@@ -438,10 +434,8 @@ def test_i7_auth_single_use(tmp_db_path):
     request_id, auth_id, _ = _setup_authorized(conn)
     idem_key = str(uuid.uuid4())
 
-    # Erster Verbrauch: OK
     begin_execution(conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key)
 
-    # Zweiter Verbrauch: immer abgelehnt, auch mit anderem idempotency_key
     with pytest.raises(Exception):
         begin_execution(
             conn,
@@ -450,7 +444,6 @@ def test_i7_auth_single_use(tmp_db_path):
             idempotency_key=str(uuid.uuid4()),
         )
 
-    # AuditEvent muss vorhanden sein
     audit = conn.execute(
         "SELECT event_type FROM AuditEvent WHERE event_type='AUTHORIZATION_ALREADY_USED'"
     ).fetchone()
@@ -506,13 +499,19 @@ def test_cas_revision_conflict(tmp_db_path, tmp_git_repo):
     """Store nach Freigabe geändert → REVISION_CONFLICT, kein Adapter-Commit."""
     conn = get_db(tmp_db_path)
     init_schema(conn)
-    request_id, auth_id, _ = _setup_authorized(conn)
+    head = _git_head(tmp_git_repo)  # HEAD bei Request-Erstellung festlegen
+    request_id, auth_id, _ = _setup_authorized(conn, expected_revision=head)
     idem_key = str(uuid.uuid4())
 
-    head_at_approval = _git_head(tmp_git_repo)
     execution_id = begin_execution(
-        conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key
+        conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key,
+        repo_path=str(tmp_git_repo),
     )
+
+    exec_row = conn.execute(
+        "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()
+    expected_rev = exec_row["expected_revision"]
 
     # Store nach STARTED durch externen Commit verändern
     (tmp_git_repo / "foreign.txt").write_text("external change")
@@ -524,9 +523,56 @@ def test_cas_revision_conflict(tmp_db_path, tmp_git_repo):
     adapter = GitProjectStoreAdapter(repo_path=tmp_git_repo, db=conn)
     result = adapter.apply(
         payload=SAMPLE_PAYLOAD,
-        expected_revision=head_at_approval,
+        expected_revision=expected_rev,
         idempotency_key=idem_key,
         execution_id=execution_id,
     )
 
     assert result == ApplyResult.REVISION_CONFLICT
+
+
+def test_cas_foreign_commit_between_approve_and_apply(tmp_db_path, tmp_git_repo):
+    """
+    expected_revision bei Request-Erstellung festgelegt.
+    Fremder Commit zwischen approve() und apply() → REVISION_CONFLICT, kein Schreibvorgang.
+    """
+    conn = get_db(tmp_db_path)
+    init_schema(conn)
+    head = _git_head(tmp_git_repo)  # HEAD bei Request-Erstellung
+    request_id, auth_id, _ = _setup_authorized(conn, expected_revision=head)
+    idem_key = str(uuid.uuid4())
+
+    execution_id = begin_execution(
+        conn, request_id=request_id, auth_id=auth_id, idempotency_key=idem_key,
+        repo_path=str(tmp_git_repo),
+    )
+    exec_row = conn.execute(
+        "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()
+    expected_rev = exec_row["expected_revision"]
+
+    # Fremder Commit zwischen approve und apply
+    (tmp_git_repo / "other.txt").write_text("foreign content")
+    subprocess.run(["git", "add", "."], cwd=tmp_git_repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "foreign-between-approve-and-apply"],
+        cwd=tmp_git_repo, check=True, capture_output=True,
+    )
+
+    commits_before = int(subprocess.check_output(
+        ["git", "rev-list", "--count", "HEAD"], cwd=tmp_git_repo
+    ).decode().strip())
+
+    adapter = GitProjectStoreAdapter(repo_path=tmp_git_repo, db=conn)
+    result = adapter.apply(
+        payload=SAMPLE_PAYLOAD,
+        expected_revision=expected_rev,
+        idempotency_key=idem_key,
+        execution_id=execution_id,
+    )
+
+    assert result == ApplyResult.REVISION_CONFLICT
+    commits_after = int(subprocess.check_output(
+        ["git", "rev-list", "--count", "HEAD"], cwd=tmp_git_repo
+    ).decode().strip())
+    assert commits_after == commits_before, "Kein Commit bei REVISION_CONFLICT"

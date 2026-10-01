@@ -241,42 +241,61 @@ def test_c4a_crash_after_rename_before_commit(tmp_path):
         conn.close()
 
 
-# ── C5 – DIVERGENT bei unerwartetem Repo-Zustand (fremder Commit) ─────────────
+# ── C5 – DIVERGENT bei manipulierter Zieldatei (reconcile_applied_executions) ─
 
 
 def test_c5_divergent_on_foreign_commit(tmp_path):
     """
-    Kein Worker-Crash. Nach eigenem Commit wird ein fremder Commit in das Repo eingefügt.
-    Reconciliation erkennt unbekannten Commit (nicht eigener Idempotenzschlüssel)
-    → Status DIVERGENT → ESCALATED.
+    Kein Worker-Crash. Nach eigenem APPLIED-Commit wird die geschriebene Zieldatei
+    von einem fremden Commit überschrieben.
+    reconcile_applied_executions() erkennt Inhaltsänderung → DIVERGENT → ESCALATED.
+    Normaler additiver Commit (neue unabhängige Datei) löst dagegen kein DIVERGENT aus.
     50 Läufe.
     """
     for _ in range(RUNS):
         db_path = tmp_path / f"c5_{uuid.uuid4().hex}.db"
         repo = _make_repo(tmp_path, f"c5_repo_{uuid.uuid4().hex}")
 
-        # Eigenen Commit anlegen
+        # Eigenen Commit anlegen → APPLIED
         rc = _run_worker_clean("adapter_apply", db_path, repo)
         assert rc == 0
 
-        # Fremden Commit einfügen (simuliert externen Eingriff)
-        (repo / "foreign.txt").write_text("foreign change")
+        # Normaler additiver Commit (andere Datei) → kein DIVERGENT erwartet
+        (repo / "unrelated.txt").write_text("unrelated")
         subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
         subprocess.run(
-            ["git", "commit", "-m", "foreign: external-change"],
+            ["git", "commit", "-m", "unrelated-change"],
+            cwd=repo, check=True, capture_output=True,
+        )
+        rc_safe = _run_worker_clean("reconcile", db_path, repo)
+        assert rc_safe == 0
+        conn = sqlite3.connect(str(db_path))
+        status_safe = conn.execute(
+            "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        assert status_safe[0] == "APPLIED", (
+            f"Normaler Commit darf kein DIVERGENT auslösen, war: {status_safe[0]}"
+        )
+        conn.close()
+
+        # Zieldatei überschreiben (Manipulation)
+        (repo / "worker_output.txt").write_text("tampered content")
+        subprocess.run(["git", "add", "."], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "tampered-target-file"],
             cwd=repo, check=True, capture_output=True,
         )
 
-        # Reconciliation-Lauf
-        rc_reconcile = _run_worker_clean("adapter_apply", db_path, repo)
-        # Erwartet: DIVERGENT erkannt, kein erneuter Commit
+        # Reconciliation-Lauf → Inhaltsänderung erkannt
+        rc_reconcile = _run_worker_clean("reconcile", db_path, repo)
+        assert rc_reconcile == 0
         conn = sqlite3.connect(str(db_path))
         status = conn.execute(
             "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
         ).fetchone()
         assert status is not None
         assert status[0] in ("DIVERGENT", "ESCALATED"), (
-            f"Erwartete DIVERGENT/ESCALATED bei fremdem Commit, erhalten: {status[0]}"
+            f"Erwartete DIVERGENT/ESCALATED bei manipulierter Datei, erhalten: {status[0]}"
         )
         conn.close()
 
