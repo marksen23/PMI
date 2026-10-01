@@ -663,6 +663,22 @@ def test_sigkill_begin_execution_after_persist(tmp_path):
         rc = _run_worker("temporal_begin_execution", db_path, repo, "post_start_persist")
         assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
 
+        # Zustand nach Kill: STARTED muss bereits in DB stehen (Persist war vor dem Kill),
+        # Authorization muss verbraucht sein – beweist, dass der Fault-Point nach dem Schreiben lag.
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        started_row = conn.execute(
+            "SELECT id FROM Execution WHERE status='STARTED' LIMIT 1"
+        ).fetchone()
+        auth_used = conn.execute("SELECT used FROM Authorization LIMIT 1").fetchone()
+        conn.close()
+        assert started_row is not None, (
+            "STARTED-Zeile muss nach post_start_persist-Kill vorhanden sein"
+        )
+        assert auth_used is not None and auth_used["used"] == 1, (
+            "Authorization muss nach post_start_persist-Kill verbraucht sein (used=1)"
+        )
+
         # Retry
         rc_clean = _run_worker_clean("temporal_begin_execution", db_path, repo)
         assert rc_clean == 0
@@ -731,7 +747,7 @@ def test_sigkill_apply_write_after_commit(tmp_path):
 def test_sigkill_reconcile_after_divergent(tmp_path):
     """
     SIGKILL nach reconcile-Übergang (Fault-Point after_reconcile_transition).
-    Retry: idempotent – kein doppelter Übergang, Status ESCALATED oder APPLIED.
+    Retry: idempotent – kein doppelter Übergang, Status ESCALATED.
     """
     for _ in range(SIGKILL_RUNS):
         db_path = tmp_path / f"sk_rec_{uuid.uuid4().hex}.db"
@@ -753,6 +769,13 @@ def test_sigkill_reconcile_after_divergent(tmp_path):
 
         rc = _run_worker("temporal_reconcile", db_path, repo, "after_reconcile_transition")
         assert rc == -signal.SIGKILL, f"Worker muss per SIGKILL enden, rc={rc}"
+
+        # Zustand nach Kill: Übergang muss bereits vollzogen sein (ESCALATED),
+        # bevor der Prozess geendet hat – beweist, dass after_reconcile_transition
+        # nach dem Status-Update liegt.
+        assert _execution_status(db_path) == "ESCALATED", (
+            "ESCALATED muss bereits nach dem Kill in DB stehen, nicht erst nach Retry"
+        )
 
         # Retry
         rc_clean = _run_worker_clean("temporal_reconcile", db_path, repo)
