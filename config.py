@@ -12,6 +12,15 @@ COST_THRESHOLD_ENABLED: bool = False  # PROVISIONAL – deaktiviert
 
 DIVERGENT_RECONCILIATION_STRATEGY: str = "none"  # PROVISIONAL – keine automatische Reconciliation in Phase 1
 
+import os as _os
+
 # HMAC-Schlüssel zur Signierung von Authorization-Datensätzen.
+# Muss als Umgebungsvariable PMI_AUTHORIZATION_HMAC_SECRET gesetzt sein.
 # begin_execution() prüft die Signatur; rohes INSERT ohne gültigen HMAC wird abgewiesen.
-AUTHORIZATION_HMAC_SECRET: bytes = b"provisional-dev-secret"  # PROVISIONAL
+_raw_secret = _os.environ.get("PMI_AUTHORIZATION_HMAC_SECRET", "")
+if not _raw_secret:
+    raise RuntimeError(
+        "PMI_AUTHORIZATION_HMAC_SECRET ist nicht gesetzt. "
+        "Die App kann ohne HMAC-Schlüssel nicht starten."
+    )
+AUTHORIZATION_HMAC_SECRET: bytes = _raw_secret.encode()  # PROVISIONAL – Format

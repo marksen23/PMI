@@ -49,12 +49,23 @@ def scenario_adapter_apply(db_path: str, repo_path: str) -> None:
     conn = get_db(db_path)
     init_schema(conn)
     payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
-    _, request_id = _setup_request(conn, payload)
-    auth = approve(conn, request_id, person="alice")
-    idem_key = str(uuid.uuid4())
-    execution_id = begin_execution(
-        conn, request_id=request_id, auth_id=auth.id, idempotency_key=idem_key
-    )
+
+    # Reconciliation: vorhandene STARTED-Execution wiederverwenden (nach Crash)
+    existing = conn.execute(
+        "SELECT id, idempotency_key FROM Execution WHERE status='STARTED' "
+        "ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if existing:
+        execution_id = existing["id"]
+        idem_key = existing["idempotency_key"]
+    else:
+        _, request_id = _setup_request(conn, payload)
+        auth = approve(conn, request_id, person="alice")
+        idem_key = str(uuid.uuid4())
+        execution_id = begin_execution(
+            conn, request_id=request_id, auth_id=auth.id, idempotency_key=idem_key
+        )
+
     head = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=repo_path,
     ).decode().strip()

@@ -294,8 +294,11 @@ def test_i3_applied_to_failed_always_rejected(tmp_db_path, tmp_git_repo):
 def test_i3_hypothesis_no_failed_with_changed_revision(proof, tmp_path):
     """hypothesis: niemals FAILED wenn Store-Revision geändert wurde."""
     import subprocess as sp
-    db_path = tmp_path / "h_control.db"
-    repo = tmp_path / "h_repo"
+    import tempfile
+    # Eindeutiges Verzeichnis pro Iteration (tmp_path wird von hypothesis wiederverwendet)
+    run_dir = Path(tempfile.mkdtemp(dir=tmp_path))
+    db_path = run_dir / "h_control.db"
+    repo = run_dir / "h_repo"
     repo.mkdir()
     sp.run(["git", "init", str(repo)], check=True, capture_output=True)
     sp.run(["git", "config", "user.email", "t@t.com"], cwd=repo, check=True, capture_output=True)
@@ -308,7 +311,8 @@ def test_i3_hypothesis_no_failed_with_changed_revision(proof, tmp_path):
     init_schema(conn)
     request_id, auth_id, _ = _setup_authorized(conn)
     execution_id = begin_execution(
-        conn, request_id=request_id, auth_id=auth_id, idempotency_key=str(uuid.uuid4())
+        conn, request_id=request_id, auth_id=auth_id,
+        idempotency_key=str(uuid.uuid4()), repo_path=str(repo),
     )
 
     # Fremden Commit in den Store einfügen (simuliert geänderte Revision)
