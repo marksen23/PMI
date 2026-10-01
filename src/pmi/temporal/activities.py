@@ -129,11 +129,19 @@ class ReadExecutionStatusInput:
 async def activity_draft_proposal(args: DraftProposalInput) -> DraftProposalResult:
     conn = get_db(args.db_path)
     init_schema(conn)
+    dedup_key = _dedup(args.workflow_id, args.step, "DRAFT_PROPOSAL")
+    existing = conn.execute(
+        "SELECT payload_json FROM AuditEvent WHERE dedup_key=?", (dedup_key,)
+    ).fetchone()
+    if existing:
+        data = json.loads(existing["payload_json"])
+        conn.close()
+        return DraftProposalResult(proposal_id=data["proposal_id"], payload=_stub_payload())
     payload = _stub_payload()
     proposal_id = insert_proposal(conn, payload, proposed_by="agent:stub")
     append_audit(
         conn,
-        _dedup(args.workflow_id, args.step, "DRAFT_PROPOSAL"),
+        dedup_key,
         "DRAFT_PROPOSAL",
         None,
         0,
