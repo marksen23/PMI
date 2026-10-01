@@ -231,11 +231,13 @@ Reihenfolge: db → risk → git_adapter → state_machine → agent → approva
 
 ---
 
-# Auftrag 1b – Kernkorrekturen (Haltepunkt 2: Tests rot)
+# Auftrag 1b – Kernkorrekturen
 
 Stand: 2026-10-01
-Kern-Änderungen für die Punkte unten sind freigegeben. Implementierung erst nach
-Freigabe dieser Tests. Bestehende Testdateien werden nicht geändert.
+Tests lagen rot vor. Umsetzung im Kern, nicht im Wrapper. Bestehende Testdateien
+außer `tests/test_core_1b.py` sind unverändert. In dem neuen Test steht nach der
+Hash-Änderung ein `commit()`, sonst bleibt eine offene Transaktion und jede
+Exception täuscht einen Treffer vor.
 
 Die Reparatur im Activity-Wrapper ist verworfen. `begin_execution` und
 `insert_request` erzwingen die Invarianten selbst.
@@ -267,7 +269,7 @@ Authorization an und ruft `begin_execution` nicht für denselben Schlüssel auf.
 `begin_execution`. `test_i1_auth_reuse_rejected` und `test_i7_auth_single_use`
 erwarten beim zweiten Aufruf eine Exception und benutzen einen anderen Schlüssel.
 
-## Implementierung nach Freigabe, noch nicht begonnen
+## Implementierung
 
 1. `begin_execution`: `Authorization.request_id == request_id`. Gespeicherten
    `request_hash` gegen den aktuellen Request-Hash prüfen. Bei eigenem
