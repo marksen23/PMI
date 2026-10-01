@@ -359,6 +359,122 @@ def test_c6_crash_post_start_pre_write(tmp_path):
         conn.close()
 
 
+# ── Steckbrief C2 – Crash nach Commit, vor DB-Ack ────────────────────────────
+
+
+def test_steckbrief_c2_no_duplicate_commit(tmp_path):
+    """
+    Fault-Point post_steckbrief_commit: Crash nach git-Commit, vor DB-Ack (APPLIED).
+    Retry: Idempotenzschlüssel erkannt → ALREADY_APPLIED, kein Doppel-Commit.
+    Bundle-Hash im Repo = erwarteter Hash, Status APPLIED.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from worker_crash import _minimal_steckbrief_payload
+    from pmi.agent_schema import ProposalOutput
+    from pmi.agent_store import compute_stored_hash, compute_expected_hash
+
+    for _ in range(RUNS):
+        db_path = tmp_path / f"sbc2_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"sbc2_repo_{uuid.uuid4().hex}")
+        commits_before = _commit_count(repo)
+
+        rc = _run_worker("steckbrief_apply", db_path, repo, fault_point="post_steckbrief_commit")
+        assert rc != 0
+
+        # Genau 1 Commit im Repo (wurde vor dem Crash abgesetzt)
+        assert _commit_count(repo) == commits_before + 1
+
+        # Retry → Idempotenz: kein zweiter Commit
+        rc_clean = _run_worker_clean("steckbrief_apply", db_path, repo)
+        assert rc_clean == 0
+        assert _commit_count(repo) == commits_before + 1, "Kein Doppel-Commit nach Steckbrief-C2-Retry"
+
+        # projekt_id aus DB ermitteln
+        conn = sqlite3.connect(str(db_path))
+        exec_row = conn.execute(
+            "SELECT er.proposal_id FROM Execution e "
+            "JOIN ExecutionRequest er ON er.id = e.request_id "
+            "ORDER BY e.started_at DESC LIMIT 1"
+        ).fetchone()
+        assert exec_row is not None
+        projekt_id = exec_row[0]
+
+        status = conn.execute(
+            "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        assert status[0] == "APPLIED"
+        conn.close()
+
+        # Bundle-Hash korrekt
+        expected_output = ProposalOutput.model_validate(_minimal_steckbrief_payload())
+        project_dir = repo / "projekte" / projekt_id
+        assert project_dir.exists()
+        assert compute_stored_hash(project_dir) == compute_expected_hash(expected_output)
+
+
+# ── Steckbrief C4a – Crash nach store_proposal, vor Commit ───────────────────
+
+
+def test_steckbrief_c4a_bundle_intact(tmp_path):
+    """
+    Fault-Point pre_steckbrief_commit: Crash nach store_proposal(), vor git-Commit.
+    Retry: Cleanup der uncommitted Dateien, dann 1 sauberer Commit.
+    Bundle-Hash korrekt, git status sauber, Status APPLIED.
+    """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from worker_crash import _minimal_steckbrief_payload
+    from pmi.agent_schema import ProposalOutput
+    from pmi.agent_store import compute_stored_hash, compute_expected_hash
+
+    for _ in range(RUNS):
+        db_path = tmp_path / f"sbc4a_{uuid.uuid4().hex}.db"
+        repo = _make_repo(tmp_path, f"sbc4a_repo_{uuid.uuid4().hex}")
+        commits_before = _commit_count(repo)
+
+        rc = _run_worker("steckbrief_apply", db_path, repo, fault_point="pre_steckbrief_commit")
+        assert rc != 0
+
+        # Kein Commit (Crash vor git commit)
+        assert _commit_count(repo) == commits_before
+
+        # Retry → 1 sauberer Commit
+        rc_clean = _run_worker_clean("steckbrief_apply", db_path, repo)
+        assert rc_clean == 0
+        assert _commit_count(repo) == commits_before + 1
+
+        # git status sauber nach Recovery
+        result = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=repo, capture_output=True, check=True,
+        )
+        assert result.stdout.decode().strip() == "", (
+            "git status muss nach Steckbrief-C4a-Recovery sauber sein"
+        )
+
+        # projekt_id aus DB ermitteln
+        conn = sqlite3.connect(str(db_path))
+        exec_row = conn.execute(
+            "SELECT er.proposal_id FROM Execution e "
+            "JOIN ExecutionRequest er ON er.id = e.request_id "
+            "ORDER BY e.started_at DESC LIMIT 1"
+        ).fetchone()
+        assert exec_row is not None
+        projekt_id = exec_row[0]
+
+        status = conn.execute(
+            "SELECT status FROM Execution ORDER BY started_at DESC LIMIT 1"
+        ).fetchone()
+        assert status[0] == "APPLIED"
+        conn.close()
+
+        # Bundle-Hash korrekt
+        expected_output = ProposalOutput.model_validate(_minimal_steckbrief_payload())
+        project_dir = repo / "projekte" / projekt_id
+        assert project_dir.exists()
+        assert compute_stored_hash(project_dir) == compute_expected_hash(expected_output)
+
+
 # ── Gegenproben: Recovery-Logik brechen ──────────────────────────────────────
 
 

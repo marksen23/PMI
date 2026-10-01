@@ -1,5 +1,6 @@
 """Atomarer Git-Write mit CAS und Idempotenz."""
 import json
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -69,6 +70,71 @@ class GitProjectStoreAdapter:
     def _atomic_rename(self, tmp_path: Path, target_path: Path) -> None:
         tmp_path.rename(target_path)
 
+    def _get_proposal_id_for_execution(self, execution_id: str) -> str:
+        row = self.db.execute(
+            "SELECT er.proposal_id FROM Execution e "
+            "JOIN ExecutionRequest er ON er.id = e.request_id "
+            "WHERE e.id = ?",
+            (execution_id,),
+        ).fetchone()
+        if row is None:
+            raise RuntimeError(f"Kein Proposal für execution_id={execution_id}")
+        return row[0]
+
+    def _cleanup_steckbrief_leftovers(self, projekt_id: str) -> None:
+        """Bereinigt uncommitted Steckbrief-Dateien von pre_steckbrief_commit-Crash."""
+        project_dir = self.repo_path / "projekte" / projekt_id
+        if not project_dir.exists():
+            return
+        result = self._git(
+            "status", "--porcelain",
+            str(project_dir.relative_to(self.repo_path)),
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.decode().strip():
+            shutil.rmtree(project_dir)
+
+    def _apply_steckbrief(
+        self,
+        payload: dict,
+        idempotency_key: str,
+        execution_id: str,
+    ) -> "ApplyResult":
+        from pmi.agent_schema import ProposalOutput
+        from pmi.agent_store import store_proposal
+
+        projekt_id = self._get_proposal_id_for_execution(execution_id)
+
+        self._cleanup_steckbrief_leftovers(projekt_id)
+
+        output = ProposalOutput.model_validate(payload)
+        store_proposal(
+            output,
+            projekt_id=projekt_id,
+            repo_path=self.repo_path,
+            conn=self.db,
+            execution_id=execution_id,
+        )
+
+        maybe_crash("pre_steckbrief_commit")
+
+        project_dir = self.repo_path / "projekte" / projekt_id
+        self._git("add", str(project_dir.relative_to(self.repo_path)))
+        commit_msg = (
+            f"{self._idempotency_marker(idempotency_key)}\n"
+            f"pmi-execution:{execution_id}"
+        )
+        self._git("commit", "-m", commit_msg)
+
+        maybe_crash("post_steckbrief_commit")
+
+        try:
+            transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
+        except TransitionError:
+            pass
+
+        return ApplyResult.APPLIED
+
     def apply(
         self,
         payload: dict,
@@ -83,26 +149,19 @@ class GitProjectStoreAdapter:
         # Idempotenz: eigener Commit bereits vorhanden?
         own_commit = self._find_own_commit(idempotency_key)
         if own_commit:
-            current_head = self._current_head()
-            if current_head == own_commit:
-                try:
-                    transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
-                except TransitionError:
-                    pass
-                return ApplyResult.ALREADY_APPLIED
-            else:
-                # Eigener Commit da, aber noch ein fremder darüber
-                # (eigene Datei könnte unverändert sein – prüft reconcile_applied_executions)
-                try:
-                    transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
-                except TransitionError:
-                    pass
-                return ApplyResult.ALREADY_APPLIED
+            try:
+                transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
+            except TransitionError:
+                pass
+            return ApplyResult.ALREADY_APPLIED
 
         # CAS: HEAD muss expected_revision entsprechen
         current_head = self._current_head()
         if current_head != expected_revision:
             return ApplyResult.REVISION_CONFLICT
+
+        if "steckbrief" in payload:
+            return self._apply_steckbrief(payload, idempotency_key, execution_id)
 
         # Reconciliation: war eine Zieldatei vorhanden (post_rename_pre_commit-Crash)?
         self._cleanup_leftover(payload, idempotency_key)
@@ -153,7 +212,7 @@ class GitProjectStoreAdapter:
         Normale additive Commits (neue Dateien) lösen kein DIVERGENT aus.
         """
         rows = self.db.execute(
-            "SELECT e.id, e.idempotency_key, p.payload_json "
+            "SELECT e.id, e.idempotency_key, p.payload_json, er.proposal_id "
             "FROM Execution e "
             "JOIN ExecutionRequest er ON er.id = e.request_id "
             "JOIN Proposal p ON p.id = er.proposal_id "
@@ -170,6 +229,25 @@ class GitProjectStoreAdapter:
             if own_commit is None:
                 transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
                 diverged.append(execution_id)
+                continue
+
+            if "steckbrief" in payload:
+                projekt_id = row["proposal_id"]
+                project_dir = self.repo_path / "projekte" / projekt_id
+                diverged_flag = False
+                for filename in ("proposal.json", "steckbrief.md", "risikoliste.md"):
+                    file_path = project_dir / filename
+                    rel = str(file_path.relative_to(self.repo_path))
+                    show_result = self._git("show", f"{own_commit}:{rel}", check=False)
+                    if show_result.returncode != 0:
+                        diverged_flag = True
+                        break
+                    if not file_path.exists() or file_path.read_bytes() != show_result.stdout:
+                        diverged_flag = True
+                        break
+                if diverged_flag:
+                    transition(self.db, execution_id=execution_id, to_state=ExecutionStatus.DIVERGENT)
+                    diverged.append(execution_id)
                 continue
 
             target_path = self.repo_path / str(payload.get("path", "output.txt"))

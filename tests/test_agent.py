@@ -348,15 +348,16 @@ def _git_head(repo: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 16. Durchstich-Test: run_agent → approve → begin_execution → store_proposal → APPLIED
+# 16. Durchstich-Test: run_agent → approve → begin_execution → adapter.apply → APPLIED
 # ---------------------------------------------------------------------------
 
 def test_e2e_agent_proposal_flow(tmp_git_repo, tmp_db_path):
     """Vollständiger Durchstich für Steckbrief-Proposals durch die PMI-Governance-Kette."""
     from pmi.approval import approve
-    from pmi.state_machine import begin_execution, transition, ExecutionStatus
+    from pmi.state_machine import begin_execution
     from pmi.agent import run_agent, FakeLLMProvider
-    from pmi.agent_store import store_proposal, compute_stored_hash, compute_expected_hash
+    from pmi.agent_store import compute_stored_hash, compute_expected_hash
+    from pmi.git_adapter import GitProjectStoreAdapter, ApplyResult
 
     conn = get_db(str(tmp_db_path))
     init_schema(conn)
@@ -382,21 +383,36 @@ def test_e2e_agent_proposal_flow(tmp_git_repo, tmp_db_path):
         conn, request_id=request_id, auth_id=auth.id,
         idempotency_key=idem_key, repo_path=str(tmp_git_repo),
     )
-    status = conn.execute(
+    assert conn.execute(
         "SELECT status FROM Execution WHERE id=?", (execution_id,)
-    ).fetchone()["status"]
-    assert status == "STARTED"
+    ).fetchone()["status"] == "STARTED"
 
-    # 5. Proposal ablegen (benötigt STARTED Execution)
-    stored_path = store_proposal(
-        output, projekt_id="proj-e2e-001",
-        repo_path=tmp_git_repo, conn=conn, execution_id=execution_id,
+    # 5. Adapter anwenden (store_proposal wird intern durch den Adapter aufgerufen)
+    adapter = GitProjectStoreAdapter(repo_path=tmp_git_repo, db=conn)
+    result = adapter.apply(
+        payload=payload,
+        expected_revision=head,
+        idempotency_key=idem_key,
+        execution_id=execution_id,
     )
-    assert stored_path.exists()
-    assert compute_stored_hash(stored_path.parent) == compute_expected_hash(output)
+    assert result == ApplyResult.APPLIED
 
-    # 6. APPLIED
-    transition(conn, execution_id=execution_id, to_state=ExecutionStatus.APPLIED)
+    # 6. Genau 1 Commit mit Idempotenzschlüssel
+    git_log = subprocess.check_output(
+        ["git", "log", "--format=%s", "--all"], cwd=tmp_git_repo,
+    ).decode()
+    marker = f"pmi-idempotency-key:{idem_key}"
+    matching_commits = [line for line in git_log.splitlines() if marker in line]
+    assert len(matching_commits) == 1, (
+        f"Erwartet genau 1 Commit mit Idempotenzschlüssel, gefunden: {matching_commits}"
+    )
+
+    # 7. Bundle-Hash im Repo = freigegebener Hash
+    project_dir = tmp_git_repo / "projekte" / proposal_id
+    assert project_dir.exists()
+    assert compute_stored_hash(project_dir) == compute_expected_hash(output)
+
+    # 8. Status APPLIED (Adapter setzt Status intern)
     final_status = conn.execute(
         "SELECT status FROM Execution WHERE id=?", (execution_id,)
     ).fetchone()["status"]

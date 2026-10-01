@@ -5,10 +5,11 @@ Aufruf: python tests/worker_crash.py <scenario> <db_path> <repo_path>
 PMI_FAULT_INJECT=<point> muss als Umgebungsvariable gesetzt sein.
 
 Szenarien:
-  begin_execution  – Führt begin_execution() aus
-  adapter_apply    – Führt adapter.apply() aus (setzt voraus: STARTED in DB)
-  authorization    – Führt approve() aus
-  reconcile        – Ruft adapter.reconcile_applied_executions() auf
+  begin_execution    – Führt begin_execution() aus
+  adapter_apply      – Führt adapter.apply() aus (setzt voraus: STARTED in DB)
+  steckbrief_apply   – Führt adapter.apply() mit Steckbrief-Payload aus
+  authorization      – Führt approve() aus
+  reconcile          – Ruft adapter.reconcile_applied_executions() auf
 
 Gibt Return-Code 0 bei Erfolg (ohne Crash), oder wird durch maybe_crash() mit os._exit(1) beendet.
 """
@@ -103,6 +104,75 @@ def scenario_authorization(db_path: str, repo_path: str) -> None:
     payload = {"action": "touch_file", "path": "worker_output.txt", "scope": "local"}
     _, request_id = _setup_request(conn, payload)
     approve(conn, request_id, person="alice")
+
+
+def _minimal_steckbrief_payload() -> dict:
+    return {
+        "steckbrief": {
+            "titel": "Crash-Test-Projekt",
+            "ausgangslage": "Ist-Zustand",
+            "ziel": "Soll-Zustand",
+            "umfang": ["Modul A"],
+            "nicht_umfang": [],
+            "stakeholder": [{"name": "Alice", "rolle": "Projektleiterin"}],
+            "meilensteine": [],
+            "budget_rahmen": None,
+            "erfolgskriterien": ["Kriterium 1"],
+            "annahmen": [],
+            "offene_fragen": [],
+        },
+        "risikoliste": {"risiken": [{
+            "beschreibung": "Risiko 1",
+            "ursache": "Ursache",
+            "auswirkung": "Auswirkung",
+            "wahrscheinlichkeit": "niedrig",
+            "schadensausmass": "niedrig",
+            "massnahme": "Maßnahme",
+            "verantwortlich_vorschlag": "Projektleiterin",
+        }]},
+    }
+
+
+def scenario_steckbrief_apply(db_path: str, repo_path: str) -> None:
+    from pmi.db import get_db, init_schema
+    from pmi.approval import approve
+    from pmi.state_machine import begin_execution
+    from pmi.git_adapter import GitProjectStoreAdapter
+
+    conn = get_db(db_path)
+    init_schema(conn)
+    payload = _minimal_steckbrief_payload()
+
+    # Reconciliation: vorhandene STARTED-Execution wiederverwenden (nach Crash)
+    existing = conn.execute(
+        "SELECT id, idempotency_key FROM Execution WHERE status='STARTED' "
+        "ORDER BY started_at DESC LIMIT 1"
+    ).fetchone()
+    if existing:
+        execution_id = existing["id"]
+        idem_key = existing["idempotency_key"]
+    else:
+        head = _git_head(repo_path)
+        _, request_id = _setup_request(conn, payload, expected_revision=head)
+        auth = approve(conn, request_id, person="alice")
+        idem_key = str(uuid.uuid4())
+        execution_id = begin_execution(
+            conn, request_id=request_id, auth_id=auth.id, idempotency_key=idem_key,
+            repo_path=repo_path,
+        )
+
+    exec_row = conn.execute(
+        "SELECT expected_revision FROM Execution WHERE id=?", (execution_id,)
+    ).fetchone()
+    expected_rev = exec_row["expected_revision"] or ""
+
+    adapter = GitProjectStoreAdapter(repo_path=Path(repo_path), db=conn)
+    adapter.apply(
+        payload=payload,
+        expected_revision=expected_rev,
+        idempotency_key=idem_key,
+        execution_id=execution_id,
+    )
 
 
 def scenario_reconcile(db_path: str, repo_path: str) -> None:
@@ -256,6 +326,7 @@ def scenario_cp_c6(db_path: str, repo_path: str) -> None:
 SCENARIOS = {
     "begin_execution": scenario_begin_execution,
     "adapter_apply": scenario_adapter_apply,
+    "steckbrief_apply": scenario_steckbrief_apply,
     "authorization": scenario_authorization,
     "reconcile": scenario_reconcile,
     "cp_c0": scenario_cp_c0,
