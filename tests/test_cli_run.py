@@ -22,6 +22,7 @@ import pytest
 from pmi.approval import approve
 from pmi.cli import _cmd_run
 from pmi.db import get_db, init_schema, insert_proposal, insert_request
+from pmi.temporal.activities import CreateRequestInput, activity_create_request
 from pmi.temporal.workflow import InitiationWorkflow
 
 
@@ -233,3 +234,53 @@ def test_run_expired_request_creates_no_execution(tmp_db_path, tmp_git_repo, mon
         "pmi run darf bei EXPIRED-Request keine Execution-Zeile anlegen."
     )
     start_workflow_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_create_request_persists_workflow_id(tmp_db_path, tmp_git_repo):
+    """activity_create_request schreibt workflow_id in derselben Zeile wie den Request.
+
+    Der Test setzt die Spalte nicht selbst. Ein zweiter Aufruf liefert denselben
+    Request und überschreibt die gespeicherte workflow_id nicht.
+    """
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+    payload = {"action": "touch_file", "path": "wf_bind.txt", "scope": "local"}
+    proposal_id = insert_proposal(conn, payload, proposed_by="agent:stub")
+    conn.close()
+
+    workflow_id = "wf-from-activity"
+    result = await activity_create_request(CreateRequestInput(
+        db_path=str(tmp_db_path),
+        repo_path=str(tmp_git_repo),
+        proposal_id=proposal_id,
+        step=3,
+        workflow_id=workflow_id,
+    ))
+
+    conn = sqlite3.connect(str(tmp_db_path))
+    stored = conn.execute(
+        "SELECT workflow_id FROM ExecutionRequest WHERE id=?", (result.request_id,)
+    ).fetchone()
+    count = conn.execute("SELECT COUNT(*) FROM ExecutionRequest").fetchone()[0]
+    conn.close()
+    assert stored is not None and stored[0] == workflow_id
+    assert count == 1
+
+    again = await activity_create_request(CreateRequestInput(
+        db_path=str(tmp_db_path),
+        repo_path=str(tmp_git_repo),
+        proposal_id=proposal_id,
+        step=3,
+        workflow_id="wf-other",
+    ))
+    assert again.request_id == result.request_id
+
+    conn = sqlite3.connect(str(tmp_db_path))
+    stored_again = conn.execute(
+        "SELECT workflow_id FROM ExecutionRequest WHERE id=?", (result.request_id,)
+    ).fetchone()
+    count_again = conn.execute("SELECT COUNT(*) FROM ExecutionRequest").fetchone()[0]
+    conn.close()
+    assert stored_again[0] == workflow_id
+    assert count_again == 1

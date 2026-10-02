@@ -184,6 +184,7 @@ async def activity_create_request(args: CreateRequestInput) -> CreateRequestResu
         proposal_version=1,
         payload=payload,
         expected_revision=head,
+        workflow_id=args.workflow_id,
     )
     req_row = conn.execute(
         "SELECT request_hash FROM ExecutionRequest WHERE id=?", (request_id,)
