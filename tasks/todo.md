@@ -559,3 +559,8 @@ Freigabe für 16384 liegt vor. Der Provider sendet diesen Wert. Der Lauf endete
 mit `end_turn`. `evaluate()` hat hart nicht bestanden: Meilensteine befüllt,
 `budget_rahmen` mit den Nutzenzahlen aus Kapitel 5. Drei von fünfzehn
 Beschreibungen treffen einen Kapitelsatz. Keine Authorization.
+
+## IHP-Rubrik (2026-10-02)
+
+Freigabe liegt vor. Wortlaut in L8, TED 274205-2025. Prüfer und Tests sind
+nicht beauftragt. Kein Live-Lauf.
