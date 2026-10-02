@@ -45,3 +45,51 @@ Bei git-Konflikten oder Divergenz zwischen lokalem Stand und Remote-Branch:
 **Anhalten, Konflikt vorlegen, auf Marks ausdrückliche Freigabe warten.**
 Kein `git rebase`, kein `git push --force`, kein Überschreiben von Marks Dateien
 ohne explizite Zustimmung. Merge-Strategie und Auflösung immer mit Mark abstimmen.
+
+---
+
+## L6 – Auswertung der Kurzfassung Justitia 4.0 (2026-10-02)
+
+Quelle nur die Kurzfassung (j40-auftrag-kurz-v2.0-20190522). Schema bleibt unverändert.
+Auftrag 4 ist am 2026-10-02 erteilt. Der Live-Lauf ist am selben Tag erfolgt.
+Sein Befund steht in L7.
+
+Harte Pass/Fail-Kriterien: `meilensteine` nur `[]`, `budget_rahmen` nur `None`.
+Abweichung ist unbelegt, auch wenn der Wert in Trainingsdaten oder einem späteren
+Jahresbericht stimmt. Nutzenzahlen aus Kapitel 5 sind kein Projektbudget.
+
+Belegtreue der Risikoliste, eigene Note: jede `beschreibung` muss einem der acht
+Sätze aus Kapitel 7 zuordenbar sein. Eine neunte Beschreibung ist unbelegt.
+Weglassen oder Doppeln ist ein Qualitätsvermerk.
+Zuordnung: beide Seiten kleingeschrieben, Leerzeichen zusammengezogen, der Satz
+steht in der Beschreibung oder die Beschreibung im Satz. Leere Beschreibung trifft
+keinen Satz. Die Sätze stehen in `pmi/justitia_reference.py`.
+
+Ergänzungsqualität, eigene Note: `wahrscheinlichkeit` und `schadensausmass` werden
+als vom Modell ergänzt markiert. `ursache`, `auswirkung`, `massnahme` und
+`verantwortlich_vorschlag` müssen zum Risikosatz passen, ohne erfundene Zahlen,
+Termine oder Rollen. Allgemeine Floskeln gelten als schwach.
+
+---
+
+## L7 – max_tokens und der Live-Lauf (2026-10-02)
+
+`ClaudeLLMProvider` sendet `max_tokens=2048`. Der Lauf der Kurzfassung endete mit
+`stop_reason=max_tokens` nach 4266 Zeichen, mitten in den Stakeholdern. Ein zweiter
+Lauf mit 8192 Token endete ebenfalls mit `max_tokens`, im elften Risiko. Beide
+Ausgaben sind kein gültiges JSON. `evaluate()` hat sie abgewiesen. Meilensteine,
+Budget und die Beschreibungen wurden aus dem abgebrochenen Text gelesen;
+`zuordnung()` hat die elf Beschreibungen geprüft.
+
+Harte Kriterien nicht bestanden: `meilensteine` enthielt acht Einträge, abgeleitet
+aus Fussnote und Bildunterschrift. `budget_rahmen` enthielt die Nutzenzahlen aus
+Kapitel 5. Drei Beschreibungen ausserhalb von Kapitel 7 sind unbelegt. „Projektleitung“
+ist schwach. Die Zahl 25'000 steht im Text (15'000 Arbeitsplätze und 10'000 Anwälte)
+und ist für die menschliche Note belegbar; die mechanische Ziffernmarkierung bleibt.
+
+Mark hat 16384 am 2026-10-02 freigegeben. `ClaudeLLMProvider` sendet diesen
+Wert (`d4565b5` auf `cursor/agent-llm-provider`). Der Lauf damit endete mit
+`stop_reason=end_turn`. `evaluate()` hat ein gültiges `ProposalOutput` bewertet.
+Hart nicht bestanden: sieben Meilensteine, `budget_rahmen` mit den Nutzenzahlen.
+15 Beschreibungen, drei Treffer nach der Zeichenkettenregel, zwölf unbelegt.
+Keine Authorization. Der Schlüssel bleibt aus dem Repository und aus dem Chat.
