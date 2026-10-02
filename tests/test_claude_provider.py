@@ -207,6 +207,7 @@ def test_api_called_with_configured_model():
     if called_model is None and call_kwargs.kwargs:
         called_model = call_kwargs.kwargs.get("model")
     assert called_model == config.AGENT_MODEL
+    assert call_kwargs.kwargs.get("max_tokens") == 16384
 
 
 # ---------------------------------------------------------------------------
