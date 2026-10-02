@@ -35,7 +35,7 @@ class ClaudeLLMProvider(LLMProvider):
     def generate(self, prompt: str, model: str, version: str) -> str:
         response = self._client.messages.create(
             model=self._model_id,
-            max_tokens=2048,
+            max_tokens=16384,
             messages=[{"role": "user", "content": prompt}],
         )
         self._resolved_version = response.model
