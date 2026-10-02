@@ -60,6 +60,9 @@ Jahresbericht stimmt. Nutzenzahlen aus Kapitel 5 sind kein Projektbudget.
 Belegtreue der Risikoliste, eigene Note: jede `beschreibung` muss einem der acht
 Sätze aus Kapitel 7 zuordenbar sein. Eine neunte Beschreibung ist unbelegt.
 Weglassen oder Doppeln ist ein Qualitätsvermerk.
+Zuordnung: beide Seiten kleingeschrieben, Leerzeichen zusammengezogen, der Satz
+steht in der Beschreibung oder die Beschreibung im Satz. Leere Beschreibung trifft
+keinen Satz. Die Sätze stehen in `pmi/justitia_reference.py`.
 
 Ergänzungsqualität, eigene Note: `wahrscheinlichkeit` und `schadensausmass` werden
 als vom Modell ergänzt markiert. `ursache`, `auswirkung`, `massnahme` und

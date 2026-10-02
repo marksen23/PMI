@@ -475,7 +475,8 @@ nicht auf neuen Code umgehängt.
 # Auftrag 4 – Prüfer für die Kurzfassung Justitia 4.0
 
 Stand: 2026-10-02
-Auftrag erteilt. Dies ist Haltepunkt 1. Tests und Implementierung warten auf Freigabe.
+Auftrag erteilt. Haltepunkt 1 ist freigegeben, einschliesslich der beiden Präzisierungen
+unten. Tests entstehen vor dem Prüfer.
 
 ## Was der Auftrag ist
 
@@ -515,13 +516,19 @@ nicht. Dafür gibt L6 keine Pass/Fail-Regel. Das bleibt beim Menschen.
    Ziffern und die Floskeln „regelmässig prüfen“, „regelmäßig prüfen“ und „Projektleitung“
    als schwach. Rollen darüber hinaus bewertet er nicht.
 
-## PROVISIONAL, mit diesem Plan zur Freigabe
+## Entschieden mit der Freigabe
 
-Zuordnung einer Beschreibung: nach Zusammenziehen der Leerzeichen enthält die
-Beschreibung den Satz aus Kapitel 7, oder der Satz enthält die Beschreibung.
-Umschreibungen ohne diese Deckung bleiben beim Menschen und gelten nicht automatisch
-als unbelegt. Ziffern: jede Ziffernfolge in den vier Textfeldern. Floskeln: nur die
-drei genannten Zeichenketten, kleingeschrieben.
+Zuordnung: `whitespace_collapse` auf beiden Seiten, dann Kleinschreibung.
+Treffer, wenn der Satz in der Beschreibung steht oder die Beschreibung im Satz.
+Eine leere Beschreibung nach dem Zusammenziehen trifft keinen Satz, sonst wäre
+`"" in satz` für jeden Satz wahr. Umschreibungen ohne diese Deckung bleiben beim
+Menschen und gelten nicht automatisch als unbelegt.
+
+Die acht Sätze leben in `src/pmi/justitia_reference.py` als `KAPITEL7_SAETZE`.
+Prüfer und Tests importieren diese Liste. Keine zweite Abschrift.
+
+Ziffern: jede Ziffernfolge in den vier Textfeldern. Floskeln: nur „regelmässig prüfen“,
+„regelmäßig prüfen“ und „Projektleitung“, kleingeschrieben.
 
 ## Tests nach Freigabe, vorher nicht geschrieben
 
@@ -533,13 +540,15 @@ Echte Prüfung der Note, kein Mock des Schemas. Kein Netz.
 | ein Meilenstein | Hart: Fail |
 | Budget gesetzt, auch als Nutzenzahl | Hart: Fail |
 | Beschreibung gleich Satz 1 | belegt |
+| derselbe Satz kleingeschrieben, oder ein Teilsatz daraus | belegt |
+| leere Beschreibung | unbelegt |
 | Beschreibung, die keinen der acht Sätze enthält | unbelegt |
 | zwei Einträge zu Satz 1, Satz 2 fehlt | Qualitätsvermerk, kein Fail der Belegtreue |
 | „regelmässig prüfen“ in der Massnahme | schwach |
 | Ziffer in der Ursache | schwach |
 | gesetzte Wahrscheinlichkeit | nur ergänzt, Hart bleibt Pass |
 
-## Datei nach Freigabe der Tests
+## Dateien
 
-`src/pmi/eval_justitia.py` und `tests/test_eval_justitia.py`.
-Die Referenzsätze stehen im Prüfer. Kein zweites Spezifikationsdokument.
+`src/pmi/justitia_reference.py`, `src/pmi/eval_justitia.py`, `tests/test_eval_justitia.py`.
+Kein zweites Spezifikationsdokument.
