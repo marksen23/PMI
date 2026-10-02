@@ -18,7 +18,13 @@ class ClaudeLLMProvider(LLMProvider):
 
     def __init__(self, api_key: str | None = None) -> None:
         key = api_key or config.ANTHROPIC_API_KEY or None
-        self._client = anthropic.Anthropic(api_key=key)
+        headers: dict[str, str] = {}
+        if config.ANTHROPIC_WORKSPACE_ID:
+            headers["anthropic-workspace-id"] = config.ANTHROPIC_WORKSPACE_ID
+        self._client = anthropic.Anthropic(
+            api_key=key,
+            default_headers=headers or None,
+        )
         self._model_id = config.AGENT_MODEL
         self._resolved_version: str | None = None
 

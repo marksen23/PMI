@@ -26,3 +26,6 @@ AUTHORIZATION_HMAC_SECRET: bytes = _raw_secret.encode()  # PROVISIONAL – Forma
 # Schlüssel kommt aus der Umgebung – niemals im Repository oder im Audit ablegen.
 AGENT_MODEL: str = "claude-sonnet-5-5"  # PROVISIONAL – finales Modell noch nicht freigegeben
 ANTHROPIC_API_KEY: str = _os.environ.get("ANTHROPIC_API_KEY", "")
+# Workspace-ID für Request-Routing innerhalb des Anthropic-Kontos.
+# Optional – leer = Default-Workspace. Kommt ausschließlich aus der Umgebung.
+ANTHROPIC_WORKSPACE_ID: str = _os.environ.get("ANTHROPIC_WORKSPACE_ID", "")  # PROVISIONAL

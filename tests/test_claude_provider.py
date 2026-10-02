@@ -211,7 +211,52 @@ def test_api_called_with_configured_model():
 
 
 # ---------------------------------------------------------------------------
-# 7. Optionaler Live-Test (nur wenn ANTHROPIC_API_KEY gesetzt)
+# 7. Workspace-Header wird übergeben wenn ANTHROPIC_WORKSPACE_ID gesetzt ist
+# ---------------------------------------------------------------------------
+
+def test_workspace_header_passed_when_set(monkeypatch):
+    """anthropic-workspace-id landet in default_headers, wenn die ENV gesetzt ist."""
+    import config
+    from pmi.claude_provider import ClaudeLLMProvider
+
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", "wrkspc_test123")
+    # config-Wert neu einlesen
+    monkeypatch.setattr(config, "ANTHROPIC_WORKSPACE_ID", "wrkspc_test123")
+
+    captured: dict = {}
+
+    def mock_anthropic(**kwargs: object) -> MagicMock:
+        captured.update(kwargs)
+        return _make_mock_client("{}")
+
+    with patch("pmi.claude_provider.anthropic.Anthropic", side_effect=mock_anthropic):
+        ClaudeLLMProvider(api_key="test-key")
+
+    headers = captured.get("default_headers") or {}
+    assert headers.get("anthropic-workspace-id") == "wrkspc_test123"
+
+
+def test_workspace_header_absent_when_not_set(monkeypatch):
+    """default_headers ist None wenn ANTHROPIC_WORKSPACE_ID leer ist."""
+    import config
+    from pmi.claude_provider import ClaudeLLMProvider
+
+    monkeypatch.setattr(config, "ANTHROPIC_WORKSPACE_ID", "")
+
+    captured: dict = {}
+
+    def mock_anthropic(**kwargs: object) -> MagicMock:
+        captured.update(kwargs)
+        return _make_mock_client("{}")
+
+    with patch("pmi.claude_provider.anthropic.Anthropic", side_effect=mock_anthropic):
+        ClaudeLLMProvider(api_key="test-key")
+
+    assert captured.get("default_headers") is None
+
+
+# ---------------------------------------------------------------------------
+# 9. Optionaler Live-Test (nur wenn ANTHROPIC_API_KEY gesetzt)
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(
