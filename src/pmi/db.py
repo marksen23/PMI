@@ -128,6 +128,7 @@ def insert_request(
     proposal_version: int,
     payload: dict,
     expected_revision: str = "",
+    workflow_id: str | None = None,
 ) -> str:
     """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD).
 
@@ -146,9 +147,9 @@ def insert_request(
     request_id = str(uuid.uuid4())
     conn.execute(
         "INSERT INTO ExecutionRequest "
-        "(id, proposal_id, proposal_version, request_hash, expected_revision) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (request_id, proposal_id, proposal_version, request_hash, revision),
+        "(id, proposal_id, proposal_version, request_hash, expected_revision, workflow_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (request_id, proposal_id, proposal_version, request_hash, revision, workflow_id),
     )
     conn.commit()
     return request_id

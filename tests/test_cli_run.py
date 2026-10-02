@@ -12,6 +12,7 @@ Nagelt drei Invarianten fest, die vor jeder Änderung an _cmd_run bestehen müss
 3. GRÜN – EXPIRED-Request erzeugt keine Execution-Zeile, und _cmd_run startet keinen
           neuen Workflow, wenn der Request abgelaufen ist.
 """
+import asyncio
 import sqlite3
 import uuid
 from pathlib import Path
@@ -21,7 +22,13 @@ import pytest
 
 from pmi.approval import approve
 from pmi.cli import _cmd_run
-from pmi.db import get_db, init_schema, insert_proposal, insert_request
+from pmi.db import get_db, init_schema
+from pmi.temporal.activities import (
+    CreateRequestInput,
+    DraftProposalInput,
+    activity_create_request,
+    activity_draft_proposal,
+)
 from pmi.temporal.workflow import InitiationWorkflow
 
 
@@ -32,41 +39,73 @@ def _execution_count(db_path: Path) -> int:
     return n
 
 
-def _setup_open_request(db_path: Path) -> tuple[str, str, str]:
-    """Legt Proposal + OPEN ExecutionRequest (mit workflow_id) + Authorization an.
-    Gibt (request_id, auth_id, workflow_id) zurück."""
+def _setup_open_request(db_path: Path, repo_path: Path) -> tuple[str, str, str]:
+    """Legt Proposal + OPEN ExecutionRequest (mit workflow_id via activity) + Authorization an.
+    Gibt (request_id, auth_id, workflow_id) zurück.
+    workflow_id wird von activity_create_request in die DB geschrieben – nicht per UPDATE."""
+    async def _run():
+        workflow_id = f"pmi-test-wf-{uuid.uuid4()}"
+        draft = await activity_draft_proposal(DraftProposalInput(
+            task="cli-test-task",
+            db_path=str(db_path),
+            step=1,
+            workflow_id=workflow_id,
+        ))
+        create = await activity_create_request(CreateRequestInput(
+            db_path=str(db_path),
+            repo_path=str(repo_path),
+            proposal_id=draft.proposal_id,
+            step=3,
+            workflow_id=workflow_id,
+        ))
+        return create.request_id, workflow_id
+
+    request_id, workflow_id = asyncio.run(_run())
+
     conn = get_db(str(db_path))
-    init_schema(conn)
-    payload = {"action": "touch_file", "path": "run_cli_test.txt", "scope": "local"}
-    proposal_id = insert_proposal(conn, payload, "test-agent")
-    request_id = insert_request(conn, proposal_id, 1, payload, "")
-    workflow_id = f"pmi-test-wf-{uuid.uuid4()}"
-    conn.execute(
-        "UPDATE ExecutionRequest SET workflow_id=? WHERE id=?", (workflow_id, request_id)
-    )
-    conn.commit()
+    row = conn.execute(
+        "SELECT workflow_id FROM ExecutionRequest WHERE id=?", (request_id,)
+    ).fetchone()
+    wf_id_from_db = row["workflow_id"]
     auth = approve(conn, request_id, person="test-approver")
     conn.close()
-    return request_id, auth.id, workflow_id
+    return request_id, auth.id, wf_id_from_db
 
 
-def _setup_expired_request(db_path: Path) -> tuple[str, str, str]:
-    """Legt EXPIRED ExecutionRequest (mit workflow_id) + nachträgliche Authorization an.
+def _setup_expired_request(db_path: Path, repo_path: Path) -> tuple[str, str, str]:
+    """Legt EXPIRED ExecutionRequest (workflow_id via activity) + nachträgliche Authorization an.
     Gibt (request_id, auth_id, workflow_id) zurück."""
+    async def _run():
+        workflow_id = f"pmi-test-expired-wf-{uuid.uuid4()}"
+        draft = await activity_draft_proposal(DraftProposalInput(
+            task="cli-expired-task",
+            db_path=str(db_path),
+            step=1,
+            workflow_id=workflow_id,
+        ))
+        create = await activity_create_request(CreateRequestInput(
+            db_path=str(db_path),
+            repo_path=str(repo_path),
+            proposal_id=draft.proposal_id,
+            step=3,
+            workflow_id=workflow_id,
+        ))
+        return create.request_id, workflow_id
+
+    request_id, workflow_id = asyncio.run(_run())
+
     conn = get_db(str(db_path))
-    init_schema(conn)
-    payload = {"action": "touch_file", "path": "expired_cli_test.txt", "scope": "local"}
-    proposal_id = insert_proposal(conn, payload, "test-agent")
-    request_id = insert_request(conn, proposal_id, 1, payload, "")
-    workflow_id = f"pmi-test-expired-wf-{uuid.uuid4()}"
+    row = conn.execute(
+        "SELECT workflow_id FROM ExecutionRequest WHERE id=?", (request_id,)
+    ).fetchone()
+    wf_id_from_db = row["workflow_id"]
     conn.execute(
-        "UPDATE ExecutionRequest SET status='EXPIRED', workflow_id=? WHERE id=?",
-        (workflow_id, request_id),
+        "UPDATE ExecutionRequest SET status='EXPIRED' WHERE id=?", (request_id,)
     )
     conn.commit()
     auth = approve(conn, request_id, person="late-approver")
     conn.close()
-    return request_id, auth.id, workflow_id
+    return request_id, auth.id, wf_id_from_db
 
 
 # ── Test 1 (ROT): pmi run signalisiert den richtigen Workflow mit der richtigen auth_id ──
@@ -93,7 +132,7 @@ def test_run_signals_workflow_with_correct_auth(tmp_db_path, tmp_git_repo, monke
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path, tmp_git_repo)
 
     signal_calls: list[dict] = []
 
@@ -161,7 +200,7 @@ def test_run_does_not_create_execution_directly(tmp_db_path, tmp_git_repo, monke
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path, tmp_git_repo)
 
     mock_handle = MagicMock()
     mock_handle.signal = AsyncMock()
@@ -206,7 +245,7 @@ def test_run_expired_request_creates_no_execution(tmp_db_path, tmp_git_repo, mon
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id, workflow_id = _setup_expired_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_expired_request(tmp_db_path, tmp_git_repo)
 
     async def fake_signal_closed(*args, **kwargs):
         raise RuntimeError("Workflow bereits geschlossen (simuliert EXPIRED/done)")
