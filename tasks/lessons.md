@@ -87,7 +87,9 @@ Kapitel 5. Drei Beschreibungen ausserhalb von Kapitel 7 sind unbelegt. „Projek
 ist schwach. Die Zahl 25'000 steht im Text (15'000 Arbeitsplätze und 10'000 Anwälte)
 und ist für die menschliche Note belegbar; die mechanische Ziffernmarkierung bleibt.
 
-Ein höherer `max_tokens`-Wert ist PROVISIONAL. Vorschlag: 16384. 8192 hat diesen
-Lauf nicht abgeschlossen. `claude_provider.py` bleibt unverändert, bis Mark den
-Wert ausdrücklich freigibt. Den API-Schlüssel nach dem Widerruf nicht wieder
-in den Chat legen.
+Mark hat 16384 am 2026-10-02 freigegeben. `ClaudeLLMProvider` sendet diesen
+Wert (`d4565b5` auf `cursor/agent-llm-provider`). Der Lauf damit endete mit
+`stop_reason=end_turn`. `evaluate()` hat ein gültiges `ProposalOutput` bewertet.
+Hart nicht bestanden: sieben Meilensteine, `budget_rahmen` mit den Nutzenzahlen.
+15 Beschreibungen, drei Treffer nach der Zeichenkettenregel, zwölf unbelegt.
+Keine Authorization. Der Schlüssel bleibt aus dem Repository und aus dem Chat.
