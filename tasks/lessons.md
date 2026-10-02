@@ -51,7 +51,8 @@ ohne explizite Zustimmung. Merge-Strategie und Auflösung immer mit Mark abstimm
 ## L6 – Auswertung der Kurzfassung Justitia 4.0 (2026-10-02)
 
 Quelle nur die Kurzfassung (j40-auftrag-kurz-v2.0-20190522). Schema bleibt unverändert.
-Auftrag 4 ist am 2026-10-02 erteilt. Der Live-Lauf gegen das PDF wartet auf den DPA.
+Auftrag 4 ist am 2026-10-02 erteilt. Der Live-Lauf ist am selben Tag erfolgt.
+Sein Befund steht in L7.
 
 Harte Pass/Fail-Kriterien: `meilensteine` nur `[]`, `budget_rahmen` nur `None`.
 Abweichung ist unbelegt, auch wenn der Wert in Trainingsdaten oder einem späteren
@@ -68,3 +69,25 @@ Ergänzungsqualität, eigene Note: `wahrscheinlichkeit` und `schadensausmass` we
 als vom Modell ergänzt markiert. `ursache`, `auswirkung`, `massnahme` und
 `verantwortlich_vorschlag` müssen zum Risikosatz passen, ohne erfundene Zahlen,
 Termine oder Rollen. Allgemeine Floskeln gelten als schwach.
+
+---
+
+## L7 – max_tokens und der Live-Lauf (2026-10-02)
+
+`ClaudeLLMProvider` sendet `max_tokens=2048`. Der Lauf der Kurzfassung endete mit
+`stop_reason=max_tokens` nach 4266 Zeichen, mitten in den Stakeholdern. Ein zweiter
+Lauf mit 8192 Token endete ebenfalls mit `max_tokens`, im elften Risiko. Beide
+Ausgaben sind kein gültiges JSON. `evaluate()` hat sie abgewiesen. Meilensteine,
+Budget und die Beschreibungen wurden aus dem abgebrochenen Text gelesen;
+`zuordnung()` hat die elf Beschreibungen geprüft.
+
+Harte Kriterien nicht bestanden: `meilensteine` enthielt acht Einträge, abgeleitet
+aus Fussnote und Bildunterschrift. `budget_rahmen` enthielt die Nutzenzahlen aus
+Kapitel 5. Drei Beschreibungen ausserhalb von Kapitel 7 sind unbelegt. „Projektleitung“
+ist schwach. Die Zahl 25'000 steht im Text (15'000 Arbeitsplätze und 10'000 Anwälte)
+und ist für die menschliche Note belegbar; die mechanische Ziffernmarkierung bleibt.
+
+Ein höherer `max_tokens`-Wert ist PROVISIONAL. Vorschlag: 16384. 8192 hat diesen
+Lauf nicht abgeschlossen. `claude_provider.py` bleibt unverändert, bis Mark den
+Wert ausdrücklich freigibt. Den API-Schlüssel nach dem Widerruf nicht wieder
+in den Chat legen.

@@ -552,3 +552,11 @@ Echte Prüfung der Note, kein Mock des Schemas. Kein Netz.
 
 `src/pmi/justitia_reference.py`, `src/pmi/eval_justitia.py`, `tests/test_eval_justitia.py`.
 Kein zweites Spezifikationsdokument.
+
+## Live-Lauf (2026-10-02)
+
+Der Provider bleibt bei `max_tokens=2048`. Beide Läufe endeten mit `max_tokens`,
+einer nach 4266 Zeichen, einer bei 8192 Token im elften Risiko. `evaluate()` hat
+kein gültiges `ProposalOutput` angenommen. Die harten Felder im abgebrochenen Text
+sind nicht bestanden. Eine Anhebung auf 16384 ist PROVISIONAL und wartet auf
+ausdrückliche Freigabe. `claude_provider.py` wird dafür nicht geändert.
