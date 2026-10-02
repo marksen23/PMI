@@ -5,10 +5,12 @@ Nagelt drei Invarianten fest, die vor jeder Änderung an _cmd_run bestehen müss
 
 1. ROT  – _cmd_run signalisiert den laufenden InitiationWorkflow über den Temporal-Client
           (ExitCode 0, handle.signal(InitiationWorkflow.authorized, auth_id) aufgerufen,
-          auth_id gehört zu dem übergebenen request_id).
+          auth_id gehört zu dem übergebenen request_id, get_workflow_handle wurde mit der
+          workflow_id aus der DB aufgerufen).
 2. GRÜN – _cmd_run erzeugt keinen Execution-Datensatz direkt in der DB,
           auch wenn request_id und auth_id gültig sind (Temporal-Pfad, nicht Kern-Pfad).
-3. GRÜN – EXPIRED-Request erzeugt keine Execution-Zeile, wenn _cmd_run aufgerufen wird.
+3. GRÜN – EXPIRED-Request erzeugt keine Execution-Zeile, und _cmd_run startet keinen
+          neuen Workflow, wenn der Request abgelaufen ist.
 """
 import sqlite3
 import uuid
@@ -30,58 +32,68 @@ def _execution_count(db_path: Path) -> int:
     return n
 
 
-def _setup_open_request(db_path: Path) -> tuple[str, str]:
-    """Legt Proposal + OPEN ExecutionRequest + Authorization an.
-    Gibt (request_id, auth_id) zurück."""
+def _setup_open_request(db_path: Path) -> tuple[str, str, str]:
+    """Legt Proposal + OPEN ExecutionRequest (mit workflow_id) + Authorization an.
+    Gibt (request_id, auth_id, workflow_id) zurück."""
     conn = get_db(str(db_path))
     init_schema(conn)
     payload = {"action": "touch_file", "path": "run_cli_test.txt", "scope": "local"}
     proposal_id = insert_proposal(conn, payload, "test-agent")
     request_id = insert_request(conn, proposal_id, 1, payload, "")
+    workflow_id = f"pmi-test-wf-{uuid.uuid4()}"
+    conn.execute(
+        "UPDATE ExecutionRequest SET workflow_id=? WHERE id=?", (workflow_id, request_id)
+    )
+    conn.commit()
     auth = approve(conn, request_id, person="test-approver")
     conn.close()
-    return request_id, auth.id
+    return request_id, auth.id, workflow_id
 
 
-def _setup_expired_request(db_path: Path) -> tuple[str, str]:
-    """Legt EXPIRED ExecutionRequest + nachträgliche Authorization an.
-    Gibt (request_id, auth_id) zurück."""
+def _setup_expired_request(db_path: Path) -> tuple[str, str, str]:
+    """Legt EXPIRED ExecutionRequest (mit workflow_id) + nachträgliche Authorization an.
+    Gibt (request_id, auth_id, workflow_id) zurück."""
     conn = get_db(str(db_path))
     init_schema(conn)
     payload = {"action": "touch_file", "path": "expired_cli_test.txt", "scope": "local"}
     proposal_id = insert_proposal(conn, payload, "test-agent")
     request_id = insert_request(conn, proposal_id, 1, payload, "")
-    conn.execute("UPDATE ExecutionRequest SET status='EXPIRED' WHERE id=?", (request_id,))
+    workflow_id = f"pmi-test-expired-wf-{uuid.uuid4()}"
+    conn.execute(
+        "UPDATE ExecutionRequest SET status='EXPIRED', workflow_id=? WHERE id=?",
+        (workflow_id, request_id),
+    )
     conn.commit()
     auth = approve(conn, request_id, person="late-approver")
     conn.close()
-    return request_id, auth.id
+    return request_id, auth.id, workflow_id
 
 
-# ── Test 1 (ROT): pmi run signalisiert den Workflow mit der richtigen auth_id ──
+# ── Test 1 (ROT): pmi run signalisiert den richtigen Workflow mit der richtigen auth_id ──
 
 def test_run_signals_workflow_with_correct_auth(tmp_db_path, tmp_git_repo, monkeypatch):
     """
     ROT jetzt: _cmd_run ist Stub → ExitCode 1, kein Signal.
-    GRÜN nach Implementierung: ExitCode 0, handle.signal(InitiationWorkflow.authorized, auth_id)
-    mit der auth_id aus der DB für das übergebene request_id.
+    GRÜN nach Implementierung: ExitCode 0,
+      - get_workflow_handle(workflow_id) mit der aus der DB gelesenen workflow_id
+      - handle.signal(InitiationWorkflow.authorized, auth_id) mit der auth_id
+        aus der DB für request_id.
 
-    Schnittstellenvertrag für die Implementierung:
-      pmi run <request_id>
-        PMI_DB_PATH       – Pfad zur SQLite-Kontroll-DB (schon in _get_db() genutzt)
-        PMI_REPO_PATH     – Pfad zum git-Repo (Umgebungsvariable)
-        PMI_TEMPORAL_HOST – Temporal-Server (Default "localhost:7233")
+    Schnittstellenvertrag:
+      PMI_DB_PATH       – SQLite-Kontroll-DB
+      PMI_REPO_PATH     – git-Repo
+      PMI_TEMPORAL_HOST – Temporal-Server (Default "localhost:7233")
 
     Geprüft:
     - ExitCode == 0
-    - handle.signal wurde aufgerufen
-    - Erstes Argument ist InitiationWorkflow.authorized (nicht eine Activity direkt)
+    - get_workflow_handle wurde mit der workflow_id aus der DB aufgerufen
+    - handle.signal wurde mit InitiationWorkflow.authorized aufgerufen
     - Signal-Argument ist die auth_id, die in der DB zu request_id gehört
     """
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id = _setup_open_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path)
 
     signal_calls: list[dict] = []
 
@@ -91,8 +103,15 @@ def test_run_signals_workflow_with_correct_auth(tmp_db_path, tmp_git_repo, monke
     mock_handle = MagicMock()
     mock_handle.signal = fake_signal
 
+    handle_calls: list[str] = []
+
+    def fake_get_handle(wf_id, *args, **kwargs):
+        handle_calls.append(wf_id)
+        return mock_handle
+
     mock_client = MagicMock()
-    mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    mock_client.get_workflow_handle = fake_get_handle
+    mock_client.start_workflow = AsyncMock()
 
     async def fake_connect(*a, **kw):
         return mock_client
@@ -108,9 +127,12 @@ def test_run_signals_workflow_with_correct_auth(tmp_db_path, tmp_git_repo, monke
         f"pmi run muss mit ExitCode 0 enden (war: {exit_code!r}). "
         "Stub gibt aktuell 1 zurück – ROT ist erwartet."
     )
+    assert handle_calls and handle_calls[0] == workflow_id, (
+        f"get_workflow_handle muss mit workflow_id={workflow_id!r} aus der DB aufgerufen werden, "
+        f"war: {handle_calls!r}"
+    )
     assert len(signal_calls) >= 1, (
-        "handle.signal muss mindestens einmal aufgerufen werden. "
-        "pmi run muss den Workflow über Temporal signalisieren, nicht direkt starten."
+        "handle.signal muss mindestens einmal aufgerufen werden."
     )
     sig = signal_calls[0]
     assert sig["fn"] is InitiationWorkflow.authorized, (
@@ -134,19 +156,19 @@ def test_run_does_not_create_execution_directly(tmp_db_path, tmp_git_repo, monke
     ein direkter begin_execution-Aufruf mit diesen Daten würde eine Execution-Zeile
     schreiben. Nach dem CLI-Aufruf muss Execution-Count == 0 sein.
 
-    Kein Eintrag = CLI hat den Kern nicht direkt aufgerufen.
     Fängt die naive Implementierung ab, die Temporal umgeht.
     """
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id = _setup_open_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_open_request(tmp_db_path)
 
     mock_handle = MagicMock()
     mock_handle.signal = AsyncMock()
 
     mock_client = MagicMock()
     mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    mock_client.start_workflow = AsyncMock()
 
     async def fake_connect(*a, **kw):
         return mock_client
@@ -163,29 +185,28 @@ def test_run_does_not_create_execution_directly(tmp_db_path, tmp_git_repo, monke
     )
 
 
-# ── Test 3 (invariant, GRÜN): EXPIRED-Request erzeugt keine Execution via CLI ──
+# ── Test 3 (invariant, GRÜN): EXPIRED-Request erzeugt keine Execution, kein neuer Workflow ──
 
 def test_run_expired_request_creates_no_execution(tmp_db_path, tmp_git_repo, monkeypatch):
     """
-    GRÜN: pmi run mit EXPIRED-request_id darf keine Execution-Zeile anlegen.
+    GRÜN: pmi run mit EXPIRED-request_id darf keine Execution-Zeile anlegen
+    und darf keinen neuen InitiationWorkflow starten.
 
     Dokumentiert, dass eine nach dem Workflow-Timeout erteilte Freigabe nicht
-    an dem Workflow vorbei ausführbar ist.
+    an dem Workflow vorbei ausführbar ist – weder durch direkten begin_execution-Aufruf
+    noch durch das Starten eines neuen Workflows.
 
     Ablauf:
     1. ExecutionRequest auf EXPIRED setzen + nachträgliche Authorization anlegen
-    2. Temporal-Client mocken (Workflow bereits beendet, Signal schlägt fehl)
+    2. Temporal-Client mocken (Workflow bereits geschlossen, Signal schlägt fehl)
     3. _cmd_run([request_id]) aufrufen
     4. Keine Execution-Zeile in DB
-
-    Schutzmechanismen: (a) Der Kernel wirft AuthorizationError("EXPIRED") bei
-    einem direkten begin_execution-Aufruf. (b) Ein laufender Workflow nimmt nach
-    seinem Timeout kein Signal mehr an.
+    5. start_workflow wurde nicht aufgerufen (kein Umgehungsweg über neuen Workflow)
     """
     monkeypatch.setenv("PMI_DB_PATH", str(tmp_db_path))
     monkeypatch.setenv("PMI_REPO_PATH", str(tmp_git_repo))
 
-    request_id, auth_id = _setup_expired_request(tmp_db_path)
+    request_id, auth_id, workflow_id = _setup_expired_request(tmp_db_path)
 
     async def fake_signal_closed(*args, **kwargs):
         raise RuntimeError("Workflow bereits geschlossen (simuliert EXPIRED/done)")
@@ -193,8 +214,11 @@ def test_run_expired_request_creates_no_execution(tmp_db_path, tmp_git_repo, mon
     mock_handle = MagicMock()
     mock_handle.signal = fake_signal_closed
 
+    start_workflow_mock = AsyncMock()
+
     mock_client = MagicMock()
     mock_client.get_workflow_handle = MagicMock(return_value=mock_handle)
+    mock_client.start_workflow = start_workflow_mock
 
     async def fake_connect(*a, **kw):
         return mock_client
@@ -206,7 +230,6 @@ def test_run_expired_request_creates_no_execution(tmp_db_path, tmp_git_repo, mon
             pass
 
     assert _execution_count(tmp_db_path) == 0, (
-        "pmi run darf bei EXPIRED-Request keine Execution-Zeile anlegen. "
-        "Weder direkter begin_execution-Aufruf (EXPIRED-Guard im Kernel) "
-        "noch ein Workflow-Signal darf eine Execution erzeugen."
+        "pmi run darf bei EXPIRED-Request keine Execution-Zeile anlegen."
     )
+    start_workflow_mock.assert_not_called()

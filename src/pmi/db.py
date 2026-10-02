@@ -30,6 +30,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             request_hash          TEXT NOT NULL,
             expected_revision     TEXT NOT NULL DEFAULT '',
             status                TEXT NOT NULL DEFAULT 'OPEN',
+            workflow_id           TEXT,
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
             consumed_by_execution_id TEXT,
             FOREIGN KEY (proposal_id) REFERENCES Proposal(id)
@@ -82,6 +83,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE ExecutionRequest ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'"
         )
+    if "workflow_id" not in req_columns:
+        conn.execute("ALTER TABLE ExecutionRequest ADD COLUMN workflow_id TEXT")
     conn.commit()
 
 
