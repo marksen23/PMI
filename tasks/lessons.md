@@ -118,8 +118,13 @@ Leere `meilensteine` sind Fail. Jedes weitere Datum, auch der Platzhalter
 verlangten Daten. Risiken bleiben eine Qualitätsnotiz. Erfundene Zahlen, Daten
 oder Rollen sind schwach. Das Schema bleibt unverändert.
 
-Live-Lauf 2026-10-02 (Fortsetzung): `ANTHROPIC_API_KEY` war gesetzt
-(`sk-ant-usr-*`). Der Aufruf endete mit HTTP 400: Workspace-Header fehlt.
-Organisation war lesbar (`organizations/me`), Workspaces nicht ohne
-Workspace-ID. Kein Proposal, keine Authorization. Nächster Versuch braucht
-`ANTHROPIC_WORKSPACE_ID` oder einen workspace-gebundenen API-Key.
+Live-Lauf 2026-10-02 (Fortsetzung): zuerst HTTP 400 ohne Workspace-Header.
+Nach gesetztem `ANTHROPIC_WORKSPACE_ID` (nur Umgebung, nicht im Repo) lief
+`claude-sonnet-5-5` mit `max_tokens` 16384 durch (`stop_reason=end_turn`).
+Gültiges `ProposalOutput`, keine Authorization. Hart bestanden: Zuschlag
+317.829,00 EUR im `budget_rahmen`, Meilensteine nicht leer, Laufzeit
+2024-12-20 und 2028-12-31 vorhanden, 858.074,65 EUR nur als höchstes
+Angebot. Unbelegt: Platzhalter 2000-01-01 sowie Meilensteindaten
+2025-04-29, 2025-07-01, 2026-01-01. Prüfer weiterhin nicht beauftragt.
+Der Workspace-Header liegt nur im Live-Skript; `ClaudeLLMProvider` liest
+ihn noch nicht.

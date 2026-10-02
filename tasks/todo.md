@@ -567,8 +567,9 @@ nicht beauftragt.
 
 ## IHP-Live-Lauf (2026-10-02, fortgesetzt)
 
-Freigabe und `ANTHROPIC_API_KEY` liegen vor. Quelle TED 274205-2025 geladen.
-Task-Text gebaut. Aufruf mit `claude-sonnet-5-5` / `max_tokens` 16384
-scheiterte: der User-Key verlangt den Header `anthropic-workspace-id`.
-`ANTHROPIC_WORKSPACE_ID` fehlt in der Umgebung. Kein Proposal, keine
-Authorization. Prüfer weiterhin nicht beauftragt.
+Freigabe, `ANTHROPIC_API_KEY` und `ANTHROPIC_WORKSPACE_ID` (nur Umgebung).
+Quelle TED 274205-2025. Lauf: `claude-sonnet-5-5`, `max_tokens` 16384,
+`stop_reason=end_turn`. Gültiges Proposal, Authorization=0. Hart nach L8
+bestanden; unbelegte Zusatzdaten in Meilensteinen. Artifact:
+`/opt/cursor/artifacts/ihp-live-eval.json`. Prüfer nicht beauftragt.
+`ClaudeLLMProvider` kennt den Workspace-Header noch nicht.
