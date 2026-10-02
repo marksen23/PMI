@@ -42,11 +42,67 @@ def _cmd_approve(args: list[str]) -> None:
 
 
 def _cmd_run(args: list[str]) -> None:
+    import asyncio
+    import os
+
+    from temporalio.client import Client
+
+    from pmi.temporal.workflow import InitiationWorkflow
+
     if len(args) != 1:
         print("Usage: pmi run <request_id>", file=sys.stderr)
         sys.exit(1)
-    print("run: noch nicht implementiert")
-    sys.exit(1)
+
+    request_id = args[0]
+    temporal_host = os.environ.get("PMI_TEMPORAL_HOST", "localhost:7233")
+
+    conn = _get_db()
+
+    req_row = conn.execute(
+        "SELECT status, workflow_id FROM ExecutionRequest WHERE id=?", (request_id,)
+    ).fetchone()
+    if req_row is None:
+        print(f"run: unbekannter request_id: {request_id}", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+
+    if req_row["status"] == "EXPIRED":
+        print(f"run: Request {request_id} ist abgelaufen (EXPIRED)", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+
+    workflow_id = req_row["workflow_id"]
+    if not workflow_id:
+        print(f"run: kein workflow_id für request_id: {request_id}", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+
+    auth_row = conn.execute(
+        "SELECT id FROM Authorization "
+        "WHERE request_id=? AND used=0 AND expires_at > datetime('now') "
+        "ORDER BY granted_at DESC LIMIT 1",
+        (request_id,),
+    ).fetchone()
+    if auth_row is None:
+        print(f"run: keine gültige Authorization für request_id: {request_id}", file=sys.stderr)
+        conn.close()
+        sys.exit(1)
+
+    auth_id = auth_row["id"]
+    conn.close()
+
+    async def _signal() -> None:
+        client = await Client.connect(temporal_host)
+        handle = client.get_workflow_handle(workflow_id)
+        await handle.signal(InitiationWorkflow.authorized, auth_id)
+
+    try:
+        asyncio.run(_signal())
+    except Exception as e:
+        print(f"run: Signal fehlgeschlagen: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sys.exit(0)
 
 
 def _cmd_status(args: list[str]) -> None:

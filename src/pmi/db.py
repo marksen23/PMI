@@ -29,6 +29,8 @@ def init_schema(conn: sqlite3.Connection) -> None:
             proposal_version      INTEGER NOT NULL,
             request_hash          TEXT NOT NULL,
             expected_revision     TEXT NOT NULL DEFAULT '',
+            status                TEXT NOT NULL DEFAULT 'OPEN',
+            workflow_id           TEXT,
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
             consumed_by_execution_id TEXT,
             FOREIGN KEY (proposal_id) REFERENCES Proposal(id)
@@ -71,11 +73,18 @@ def init_schema(conn: sqlite3.Connection) -> None:
             created_at   TEXT NOT NULL DEFAULT (datetime('now'))
         );
     """)
-    columns = [row[1] for row in conn.execute("PRAGMA table_info(Authorization)")]
-    if "request_hash" not in columns:
+    auth_columns = [row[1] for row in conn.execute("PRAGMA table_info(Authorization)")]
+    if "request_hash" not in auth_columns:
         conn.execute(
             "ALTER TABLE Authorization ADD COLUMN request_hash TEXT NOT NULL DEFAULT ''"
         )
+    req_columns = [row[1] for row in conn.execute("PRAGMA table_info(ExecutionRequest)")]
+    if "status" not in req_columns:
+        conn.execute(
+            "ALTER TABLE ExecutionRequest ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'"
+        )
+    if "workflow_id" not in req_columns:
+        conn.execute("ALTER TABLE ExecutionRequest ADD COLUMN workflow_id TEXT")
     conn.commit()
 
 
@@ -119,27 +128,35 @@ def insert_request(
     proposal_version: int,
     payload: dict,
     expected_revision: str = "",
+    workflow_id: str | None = None,
 ) -> str:
     """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD).
 
     Gleiche proposal_id, proposal_version, request_hash und expected_revision
-    liefern den vorhandenen Request zurück.
+    liefern den vorhandenen Request zurück. workflow_id wird im selben INSERT
+    geschrieben. Ein vorhandener Wert wird nicht überschrieben; NULL wird nachgezogen.
     """
     revision = expected_revision or ""
     request_hash = compute_request_hash(payload, revision)
     existing = conn.execute(
-        "SELECT id FROM ExecutionRequest "
+        "SELECT id, workflow_id FROM ExecutionRequest "
         "WHERE proposal_id=? AND proposal_version=? AND request_hash=? AND expected_revision=?",
         (proposal_id, proposal_version, request_hash, revision),
     ).fetchone()
     if existing:
+        if workflow_id and not existing["workflow_id"]:
+            conn.execute(
+                "UPDATE ExecutionRequest SET workflow_id=? WHERE id=? AND workflow_id IS NULL",
+                (workflow_id, existing["id"]),
+            )
+            conn.commit()
         return existing["id"]
     request_id = str(uuid.uuid4())
     conn.execute(
         "INSERT INTO ExecutionRequest "
-        "(id, proposal_id, proposal_version, request_hash, expected_revision) "
-        "VALUES (?, ?, ?, ?, ?)",
-        (request_id, proposal_id, proposal_version, request_hash, revision),
+        "(id, proposal_id, proposal_version, request_hash, expected_revision, workflow_id) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (request_id, proposal_id, proposal_version, request_hash, revision, workflow_id),
     )
     conn.commit()
     return request_id
