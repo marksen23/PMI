@@ -45,3 +45,23 @@ Bei git-Konflikten oder Divergenz zwischen lokalem Stand und Remote-Branch:
 **Anhalten, Konflikt vorlegen, auf Marks ausdrückliche Freigabe warten.**
 Kein `git rebase`, kein `git push --force`, kein Überschreiben von Marks Dateien
 ohne explizite Zustimmung. Merge-Strategie und Auflösung immer mit Mark abstimmen.
+
+---
+
+## L6 – Auswertung der Kurzfassung Justitia 4.0 (2026-10-02)
+
+Quelle nur die Kurzfassung (j40-auftrag-kurz-v2.0-20190522). Schema bleibt unverändert.
+Lauf erst nach DPA. Auftrag 4 bleibt ungestartet.
+
+Harte Pass/Fail-Kriterien: `meilensteine` nur `[]`, `budget_rahmen` nur `None`.
+Abweichung ist unbelegt, auch wenn der Wert in Trainingsdaten oder einem späteren
+Jahresbericht stimmt. Nutzenzahlen aus Kapitel 5 sind kein Projektbudget.
+
+Belegtreue der Risikoliste, eigene Note: jede `beschreibung` muss einem der acht
+Sätze aus Kapitel 7 zuordenbar sein. Eine neunte Beschreibung ist unbelegt.
+Weglassen oder Doppeln ist ein Qualitätsvermerk.
+
+Ergänzungsqualität, eigene Note: `wahrscheinlichkeit` und `schadensausmass` werden
+als vom Modell ergänzt markiert. `ursache`, `auswirkung`, `massnahme` und
+`verantwortlich_vorschlag` müssen zum Risikosatz passen, ohne erfundene Zahlen,
+Termine oder Rollen. Allgemeine Floskeln gelten als schwach.
