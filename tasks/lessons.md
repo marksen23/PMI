@@ -126,5 +126,5 @@ Gültiges `ProposalOutput`, keine Authorization. Hart bestanden: Zuschlag
 2024-12-20 und 2028-12-31 vorhanden, 858.074,65 EUR nur als höchstes
 Angebot. Unbelegt: Platzhalter 2000-01-01 sowie Meilensteindaten
 2025-04-29, 2025-07-01, 2026-01-01. Prüfer weiterhin nicht beauftragt.
-Der Workspace-Header liegt nur im Live-Skript; `ClaudeLLMProvider` liest
-ihn noch nicht.
+Der Workspace-Header lag beim Live-Lauf nur im Live-Skript. `ClaudeLLMProvider`
+liest ihn seit PR #6 (`ad10829`) aus der Umgebung.
