@@ -563,4 +563,12 @@ Beschreibungen treffen einen Kapitelsatz. Keine Authorization.
 ## IHP-Rubrik (2026-10-02)
 
 Freigabe liegt vor. Wortlaut in L8, TED 274205-2025. Prüfer und Tests sind
-nicht beauftragt. Kein Live-Lauf.
+nicht beauftragt.
+
+## IHP-Live-Lauf (2026-10-02, fortgesetzt)
+
+Freigabe und `ANTHROPIC_API_KEY` liegen vor. Quelle TED 274205-2025 geladen.
+Task-Text gebaut. Aufruf mit `claude-sonnet-5-5` / `max_tokens` 16384
+scheiterte: der User-Key verlangt den Header `anthropic-workspace-id`.
+`ANTHROPIC_WORKSPACE_ID` fehlt in der Umgebung. Kein Proposal, keine
+Authorization. Prüfer weiterhin nicht beauftragt.

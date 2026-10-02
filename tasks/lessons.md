@@ -117,3 +117,9 @@ Leere `meilensteine` sind Fail. Jedes weitere Datum, auch der Platzhalter
 2000-01-01, ist unbelegt. IssueDate und PublicationDate sind keine der beiden
 verlangten Daten. Risiken bleiben eine Qualitätsnotiz. Erfundene Zahlen, Daten
 oder Rollen sind schwach. Das Schema bleibt unverändert.
+
+Live-Lauf 2026-10-02 (Fortsetzung): `ANTHROPIC_API_KEY` war gesetzt
+(`sk-ant-usr-*`). Der Aufruf endete mit HTTP 400: Workspace-Header fehlt.
+Organisation war lesbar (`organizations/me`), Workspaces nicht ohne
+Workspace-ID. Kein Proposal, keine Authorization. Nächster Versuch braucht
+`ANTHROPIC_WORKSPACE_ID` oder einen workspace-gebundenen API-Key.
