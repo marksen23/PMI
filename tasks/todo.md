@@ -573,3 +573,38 @@ Quelle TED 274205-2025. Lauf: `claude-sonnet-5-5`, `max_tokens` 16384,
 bestanden; unbelegte Zusatzdaten in Meilensteinen. Artifact:
 `/opt/cursor/artifacts/ihp-live-eval.json`. Prüfer nicht beauftragt.
 `ClaudeLLMProvider` kennt den Workspace-Header noch nicht.
+
+---
+
+# Auftrag 5 – Prüfer TED 274205-2025 (IHP DMS)
+
+Stand: 2026-10-02. Erteilt, umgesetzt, grün.
+
+## Entscheidungen (A–D)
+
+- **A** Zahlenformat: normalisiert. Punkt als Tausender, Komma als Dezimal.
+  „317.829,00 EUR" und „317829.00" ergeben beide 317829.0. Mehrere Beträge
+  im Fliesstext werden einzeln erkannt (Live-Lauf-Befund L8).
+- **B** Laufzeitdaten: überall im serialisierten `ProposalOutput` gesucht
+  (`model_dump_json()`), nicht auf `meilensteine[].zieltermin` eingeschränkt.
+- **C** Modulnamen `eval_ihp.py` / `ihp_reference.py` / `test_eval_ihp.py`.
+- **D** Veraltete L8-Zeile in PR #5 vor dem Merge korrigiert (`2236deb`).
+
+## Noten (L8)
+
+1. Hart: Zuschlag in `budget_rahmen`; 858074 nur mit „höchst…"; Meilensteine
+   nicht leer; beide Laufzeitdaten irgendwo im Proposal.
+2. Unbelegt: jedes weitere `meilensteine[].zieltermin` ausser Start/Ende.
+3. Schwach: Ziffern oder Floskeln in den vier Risikotextfeldern.
+
+## Dateien
+
+- `src/pmi/ihp_reference.py`
+- `src/pmi/eval_ihp.py`
+- `tests/test_eval_ihp.py`
+
+## Status
+
+- [x] PR #5 gemergt (L8 auf main)
+- [x] Tests inkl. Live-Budgettext und Unbelegt
+- [x] Implementierung grün (`tests/test_eval_ihp.py` + Justitia unverändert)
