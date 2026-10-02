@@ -24,5 +24,5 @@ AUTHORIZATION_HMAC_SECRET: bytes = _raw_secret.encode()  # PROVISIONAL – Forma
 
 # LLM-Agent-Konfiguration (Auftrag 3).
 # Schlüssel kommt aus der Umgebung – niemals im Repository oder im Audit ablegen.
-AGENT_MODEL: str = "claude-opus-5-5"  # PROVISIONAL – finales Modell noch nicht freigegeben
+AGENT_MODEL: str = "claude-sonnet-5-5"  # PROVISIONAL – finales Modell noch nicht freigegeben
 ANTHROPIC_API_KEY: str = _os.environ.get("ANTHROPIC_API_KEY", "")
