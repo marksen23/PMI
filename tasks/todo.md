@@ -290,6 +290,8 @@ Stand: 2026-10-01
 Voraussetzung: Auftrag 1b grün und der Bericht dazu geprüft.
 Auftrag 3 und 4 starten nicht. Auftrag 3: Anbieter/Modell und Datenschutzrahmen fehlen.
 Auftrag 4: Projektauswahl, Raster, Zuordnungsregeln und Originale fehlen.
+Stand 2026-10-02: diese vier Eingaben liegen vor, der Auftrag ist erteilt.
+Der Plan steht unten. Der Live-Lauf gegen das PDF wartet auf den DPA.
 
 ## Skizze
 
@@ -467,3 +469,77 @@ nicht auf neuen Code umgehängt.
 8. Idempotenzschlüssel ist der `request_hash`.
 9. REVISION_CONFLICT und erschöpfte `apply_write`-Retries hinterlassen keine offene Execution.
 10. `RECOVERY_REQUIRED` ist kein Zustand im Code und wird nicht ergänzt.
+
+---
+
+# Auftrag 4 – Prüfer für die Kurzfassung Justitia 4.0
+
+Stand: 2026-10-02
+Auftrag erteilt. Dies ist Haltepunkt 1. Tests und Implementierung warten auf Freigabe.
+
+## Was der Auftrag ist
+
+Ein Prüfer für ein schon vorhandenes `ProposalOutput`. Er setzt L6 um.
+Er ruft kein Modell auf, liest keinen API-Schlüssel und schickt das PDF nicht.
+Schema, Provider, Workflow und `config.py` bleiben unverändert.
+
+Der Live-Lauf der Kurzfassung bleibt gesperrt, bis ein Auftragsverarbeitungsvertrag
+vorliegt. Diesen Lauf enthält der Auftrag nicht.
+
+## Quelle
+
+Nur der Wortlaut der Kurzfassung `j40-auftrag-kurz-v2.0-20190522`.
+Die acht Sätze aus Kapitel 7, als Referenz, nicht als erfundenes Projekt:
+
+1. Projektorganisation & Governance zu komplex/handlungsunfähig
+2. Widerstand der Benutzer
+3. Widerstand der kommerziellen Anbieter
+4. ungenügende Ressourcen (personell und finanziell); keine genügende Finanzierung resp. Finanzierungsstopp
+5. Unterschätzung der Tragweite und der Komplexität
+6. Rechtsetzungsprozess verzögert sich
+7. Verzögerung beim Beschaffungsprozess (WTO)
+8. Projektumfang nicht genügend klar festgelegt respektive interpretierbar.
+
+Titel, Ziel, Umfang, Stakeholder und die übrigen Steckbrief-Felder bewertet der Prüfer
+nicht. Dafür gibt L6 keine Pass/Fail-Regel. Das bleibt beim Menschen.
+
+## Drei Noten
+
+1. Hart, Pass oder Fail. `meilensteine` muss `[]` sein. `budget_rahmen` muss `None` sein.
+   Jeder andere Wert ist Fail, auch 18,5 Millionen, 40 Millionen oder 89 Millionen.
+2. Belegtreue. Jede `beschreibung` wird den acht Sätzen zugeordnet.
+   Kein Treffer: unbelegt, Note Fail für diesen Eintrag.
+   Ein Satz fehlt oder kommt doppelt vor: Qualitätsvermerk, kein Fail.
+3. Ergänzung. `wahrscheinlichkeit` und `schadensausmass` werden nur als ergänzt markiert.
+   In `ursache`, `auswirkung`, `massnahme` und `verantwortlich_vorschlag` markiert der Prüfer
+   Ziffern und die Floskeln „regelmässig prüfen“, „regelmäßig prüfen“ und „Projektleitung“
+   als schwach. Rollen darüber hinaus bewertet er nicht.
+
+## PROVISIONAL, mit diesem Plan zur Freigabe
+
+Zuordnung einer Beschreibung: nach Zusammenziehen der Leerzeichen enthält die
+Beschreibung den Satz aus Kapitel 7, oder der Satz enthält die Beschreibung.
+Umschreibungen ohne diese Deckung bleiben beim Menschen und gelten nicht automatisch
+als unbelegt. Ziffern: jede Ziffernfolge in den vier Textfeldern. Floskeln: nur die
+drei genannten Zeichenketten, kleingeschrieben.
+
+## Tests nach Freigabe, vorher nicht geschrieben
+
+Echte Prüfung der Note, kein Mock des Schemas. Kein Netz.
+
+| Test | Soll |
+|---|---|
+| leere Meilensteine und `budget_rahmen is None` | Hart: Pass |
+| ein Meilenstein | Hart: Fail |
+| Budget gesetzt, auch als Nutzenzahl | Hart: Fail |
+| Beschreibung gleich Satz 1 | belegt |
+| Beschreibung, die keinen der acht Sätze enthält | unbelegt |
+| zwei Einträge zu Satz 1, Satz 2 fehlt | Qualitätsvermerk, kein Fail der Belegtreue |
+| „regelmässig prüfen“ in der Massnahme | schwach |
+| Ziffer in der Ursache | schwach |
+| gesetzte Wahrscheinlichkeit | nur ergänzt, Hart bleibt Pass |
+
+## Datei nach Freigabe der Tests
+
+`src/pmi/eval_justitia.py` und `tests/test_eval_justitia.py`.
+Die Referenzsätze stehen im Prüfer. Kein zweites Spezifikationsdokument.

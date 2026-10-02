@@ -51,7 +51,7 @@ ohne explizite Zustimmung. Merge-Strategie und Auflösung immer mit Mark abstimm
 ## L6 – Auswertung der Kurzfassung Justitia 4.0 (2026-10-02)
 
 Quelle nur die Kurzfassung (j40-auftrag-kurz-v2.0-20190522). Schema bleibt unverändert.
-Lauf erst nach DPA. Auftrag 4 bleibt ungestartet.
+Auftrag 4 ist am 2026-10-02 erteilt. Der Live-Lauf gegen das PDF wartet auf den DPA.
 
 Harte Pass/Fail-Kriterien: `meilensteine` nur `[]`, `budget_rahmen` nur `None`.
 Abweichung ist unbelegt, auch wenn der Wert in Trainingsdaten oder einem späteren
