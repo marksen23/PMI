@@ -583,30 +583,28 @@ Stand: 2026-10-02. Erteilt, umgesetzt, grün.
 ## Entscheidungen (A–D)
 
 - **A** Zahlenformat: normalisiert. Punkt als Tausender, Komma als Dezimal.
-  „317.829,00 EUR" und „317829.00" ergeben beide 317829.0 (Live-Lauf-Befund L8).
+  „317.829,00 EUR" und „317829.00" ergeben beide 317829.0. Mehrere Beträge
+  im Fliesstext werden einzeln erkannt (Live-Lauf-Befund L8).
 - **B** Laufzeitdaten: überall im serialisierten `ProposalOutput` gesucht
   (`model_dump_json()`), nicht auf `meilensteine[].zieltermin` eingeschränkt.
-- **C** Modulnamen `eval_ihp.py` / `ihp_reference.py` / `test_eval_ihp.py` bestätigt.
-- **D** Veraltete L8-Zeile in PR #5 vor dem Merge korrigiert (Commit `2236deb`).
+- **C** Modulnamen `eval_ihp.py` / `ihp_reference.py` / `test_eval_ihp.py`.
+- **D** Veraltete L8-Zeile in PR #5 vor dem Merge korrigiert (`2236deb`).
 
-## Hartkritieren (L8)
+## Noten (L8)
 
-1. `budget_rahmen` normalisiert == 317829.00 EUR (Zuschlag).
-2. `meilensteine` nicht leer.
-3. `"2024-12-20"` kommt irgendwo vor.
-4. `"2028-12-31"` kommt irgendwo vor.
-
-Schwach: Ziffern oder `projektleitung` / `regelmä(?:ss|ß)ig prüfen` in
-`ursache`, `auswirkung`, `massnahme`, `verantwortlich_vorschlag`.
+1. Hart: Zuschlag in `budget_rahmen`; 858074 nur mit „höchst…"; Meilensteine
+   nicht leer; beide Laufzeitdaten irgendwo im Proposal.
+2. Unbelegt: jedes weitere `meilensteine[].zieltermin` ausser Start/Ende.
+3. Schwach: Ziffern oder Floskeln in den vier Risikotextfeldern.
 
 ## Dateien
 
-- `src/pmi/ihp_reference.py` – Hardfacts (ZUSCHLAG_EUR, START_DATE, END_DATE, …)
-- `src/pmi/eval_ihp.py` – Prüfer (evaluate → IhpEval)
-- `tests/test_eval_ihp.py` – 23 Tests, alle grün
+- `src/pmi/ihp_reference.py`
+- `src/pmi/eval_ihp.py`
+- `tests/test_eval_ihp.py`
 
 ## Status
 
 - [x] PR #5 gemergt (L8 auf main)
-- [x] Implementierung abgeschlossen
-- [x] 23 Tests grün
+- [x] Tests inkl. Live-Budgettext und Unbelegt
+- [x] Implementierung grün (`tests/test_eval_ihp.py` + Justitia unverändert)

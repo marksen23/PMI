@@ -17,66 +17,94 @@ from pmi.ihp_reference import (
 
 _ZIFFER = re.compile(r"\d")
 _FLOSKEL = re.compile(r"projektleitung|regelmä(?:ss|ß)ig prüfen", re.IGNORECASE)
+_HOECHST = re.compile(r"h[öo]chst", re.IGNORECASE)
+# Deutsche Beträge, EN mit Cent, oder längere Ganzzahlen (Zuschlag ohne Trenner).
+_AMOUNT_TOKEN = re.compile(
+    r"\d{1,3}(?:\.\d{3})+,\d{2}"
+    r"|\d{1,3}(?:\s\d{3})+,\d{2}"
+    r"|\d+,\d{2}"
+    r"|\d+\.\d{2}"
+    r"|\d{5,}"
+)
 
 
-def _normalize_amount(text: str) -> float | None:
-    """Wandelt deutschen Betrag in float um.
+def _normalize_amount(text: str | None) -> float | None:
+    """Wandelt einen einzelnen Betrag in float um.
 
     Akzeptiert „317.829,00" (Punkt = Tausender, Komma = Dezimal)
     sowie „317829.00" (englisches Format).
-    Gibt None zurück, wenn kein Betrag erkennbar ist.
     """
     if text is None:
         return None
-    # Nicht-numerische Suffixe (z.B. " EUR") entfernen
-    t = re.sub(r"[^\d.,]", " ", str(text)).strip()
-    # Führende/abschließende Leerzeichen zwischen Ziffern kompaktieren
-    t = t.strip()
+    t = re.sub(r"[^\d.,]", "", str(text)).strip()
     if not t:
         return None
-    # Deutsches Format erkennen: letzte Trenner bestimmen Format
-    # Wenn Komma vorkommt: Punkt = Tausender, Komma = Dezimal
     if "," in t:
         t = t.replace(".", "").replace(",", ".")
-    # Leerzeichen (als Tausendertrenner) entfernen
-    t = t.replace(" ", "")
     try:
         return float(t)
     except ValueError:
         return None
 
 
+def _amounts_in(text: str) -> tuple[float, ...]:
+    found: list[float] = []
+    for match in _AMOUNT_TOKEN.finditer(text):
+        value = _normalize_amount(match.group(0))
+        if value is not None:
+            found.append(value)
+    return tuple(found)
+
+
+def _near(a: float, b: float) -> bool:
+    return abs(a - b) <= 0.01
+
+
+def _zieltermin_str(zieltermin: object) -> str | None:
+    if zieltermin is None:
+        return None
+    if hasattr(zieltermin, "isoformat"):
+        return str(zieltermin.isoformat())
+    text = str(zieltermin).strip()
+    return text or None
+
+
 @dataclass(frozen=True)
 class IhpEval:
     hart_pass: bool
     hart_details: tuple[str, ...]
+    unbelegt: tuple[str, ...]
     schwach: tuple[str, ...]
 
 
 def evaluate(output: ProposalOutput) -> IhpEval:
-    """Bewertet output nach den harten und schwachen Kriterien aus L8."""
+    """Bewertet output nach den harten, unbelegten und schwachen Kriterien aus L8."""
     details: list[str] = []
     hart_pass = True
 
-    # --- Hartes Kriterium 1: budget_rahmen muss 317829.00 EUR sein ---
     br = output.steckbrief.budget_rahmen
-    if br is None:
+    if br is None or not str(br).strip():
         hart_pass = False
         details.append("budget_rahmen ist leer (erwartet: 317829.00 EUR)")
     else:
-        amount = _normalize_amount(br)
-        if amount is None or abs(amount - ZUSCHLAG_EUR) > 0.01:
+        amounts = _amounts_in(str(br))
+        has_award = any(_near(a, ZUSCHLAG_EUR) for a in amounts)
+        has_higher = any(_near(a, HOECHSTES_ANGEBOT_EUR) for a in amounts)
+        if not has_award:
             hart_pass = False
             details.append(
-                f"budget_rahmen ist {br!r}, erwartet {ZUSCHLAG_EUR} EUR"
+                f"budget_rahmen ist {br!r}, erwartet Zuschlag {ZUSCHLAG_EUR} EUR"
+            )
+        elif has_higher and not _HOECHST.search(str(br)):
+            hart_pass = False
+            details.append(
+                "858074.65 EUR in budget_rahmen ohne Kennzeichnung als höchstes Angebot"
             )
 
-    # --- Hartes Kriterium 2: meilensteine darf nicht leer sein ---
     if len(output.steckbrief.meilensteine) == 0:
         hart_pass = False
         details.append("meilensteine ist leer (Laufzeitdaten fehlen)")
 
-    # --- Hartes Kriterium 3+4: beide Laufzeitdaten müssen irgendwo vorkommen ---
     payload = output.model_dump_json()
     if START_DATE not in payload:
         hart_pass = False
@@ -85,17 +113,26 @@ def evaluate(output: ProposalOutput) -> IhpEval:
         hart_pass = False
         details.append(f"EndDate {END_DATE} nicht im Proposal")
 
-    # --- Schwach: erfundene Zahlen, Daten oder Rollen in den Risikofeldern ---
+    unbelegt: list[str] = []
+    for index, meilenstein in enumerate(output.steckbrief.meilensteine):
+        termin = _zieltermin_str(meilenstein.zieltermin)
+        if termin is None:
+            continue
+        if START_DATE in termin or END_DATE in termin:
+            continue
+        unbelegt.append(f"meilensteine[{index}].zieltermin={termin}")
+
     schwach: list[str] = []
-    _CHECK_FELDER = ("ursache", "auswirkung", "massnahme", "verantwortlich_vorschlag")
-    for i, risiko in enumerate(output.risikoliste.risiken):
-        for feld in _CHECK_FELDER:
+    check_felder = ("ursache", "auswirkung", "massnahme", "verantwortlich_vorschlag")
+    for index, risiko in enumerate(output.risikoliste.risiken):
+        for feld in check_felder:
             val = getattr(risiko, feld, "") or ""
             if _ZIFFER.search(val) or _FLOSKEL.search(val):
-                schwach.append(f"risiken[{i}].{feld}")
+                schwach.append(f"risiken[{index}].{feld}")
 
     return IhpEval(
         hart_pass=hart_pass,
         hart_details=tuple(details),
+        unbelegt=tuple(unbelegt),
         schwach=tuple(schwach),
     )

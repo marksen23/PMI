@@ -100,7 +100,8 @@ Keine Authorization. Der Schlüssel bleibt aus dem Repository und aus dem Chat.
 
 Mark hat am 2026-10-02 die umgekehrte Belegprobe freigegeben. Sie gilt nur für
 diesen Vergabebescheid. Die Justitia-Regel aus L6 bleibt für die Kurzfassung.
-Der Prüfer ist nicht beauftragt. Ein Live-Lauf hat nicht stattgefunden.
+Der Prüfer war zunächst nicht beauftragt; Auftrag 5 setzt L8 um.
+Der Live-Lauf stand zum Zeitpunkt der ersten L8-Ablage noch aus und folgte später.
 
 Quelle ist der TED-Bescheid 274205-2025 (can-standard). Auftraggeber ist die
 IHP GmbH. PayableAmount und TotalAmount sind 317829.00 EUR, Zuschlag an die
@@ -125,6 +126,6 @@ Gültiges `ProposalOutput`, keine Authorization. Hart bestanden: Zuschlag
 317.829,00 EUR im `budget_rahmen`, Meilensteine nicht leer, Laufzeit
 2024-12-20 und 2028-12-31 vorhanden, 858.074,65 EUR nur als höchstes
 Angebot. Unbelegt: Platzhalter 2000-01-01 sowie Meilensteindaten
-2025-04-29, 2025-07-01, 2026-01-01. Prüfer weiterhin nicht beauftragt.
+2025-04-29, 2025-07-01, 2026-01-01. Prüfer: Auftrag 5 erteilt und umgesetzt (`eval_ihp.evaluate`).
 Der Workspace-Header lag beim Live-Lauf nur im Live-Skript. `ClaudeLLMProvider`
 liest ihn seit PR #6 (`ad10829`) aus der Umgebung.
