@@ -50,7 +50,8 @@ def begin_execution(
     auth_row = conn.execute(
         "SELECT a.id, a.request_id, a.decided_by, a.expires_at, a.used, a.signature, "
         "       a.request_hash AS approved_hash, "
-        "       er.request_hash AS current_hash, er.consumed_by_execution_id, er.expected_revision "
+        "       er.request_hash AS current_hash, er.consumed_by_execution_id, "
+        "       er.expected_revision, er.status AS request_status "
         "FROM Authorization a "
         "JOIN ExecutionRequest er ON er.id = a.request_id "
         "WHERE a.id=?",
@@ -62,6 +63,9 @@ def begin_execution(
 
     if auth_row["request_id"] != request_id:
         raise AuthorizationError("Authorization gehört zu einem anderen Request")
+
+    if auth_row["request_status"] == "EXPIRED":
+        raise AuthorizationError("ExecutionRequest ist abgelaufen (EXPIRED)")
 
     approved_hash = auth_row["approved_hash"] or ""
     if approved_hash != auth_row["current_hash"]:
@@ -121,6 +125,7 @@ def begin_execution(
         conn.execute("ROLLBACK")
         raise
 
+    maybe_crash("post_start_persist")
     return execution_id
 
 
@@ -279,3 +284,6 @@ def transition(
         append_audit(conn, f"escalated:{execution_id}", "ESCALATED", execution_id, 1, {})
 
     conn.commit()
+
+    if to_state == ExecutionStatus.DIVERGENT:
+        maybe_crash("after_reconcile_transition")
