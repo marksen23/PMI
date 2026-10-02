@@ -3,14 +3,10 @@ from __future__ import annotations
 
 import pytest
 
-from pmi.agent_schema import Meilenstein, ProposalOutput
+from pmi.agent_schema import ProposalOutput
 from pmi.eval_ihp import IhpEval, _normalize_amount, evaluate
-from pmi.ihp_reference import END_DATE, HOECHSTES_ANGEBOT_EUR, START_DATE, ZUSCHLAG_EUR
+from pmi.ihp_reference import END_DATE, START_DATE
 
-
-# ---------------------------------------------------------------------------
-# Hilfsfunktion
-# ---------------------------------------------------------------------------
 
 def _output(
     *,
@@ -83,7 +79,7 @@ def test_normalize_invalid():
 
 
 # ---------------------------------------------------------------------------
-# Hartes Kriterium 1: budget_rahmen
+# Hart: budget_rahmen
 # ---------------------------------------------------------------------------
 
 
@@ -96,6 +92,16 @@ def test_hart_pass_budget_english():
 def test_hart_pass_budget_german():
     """Deutsches Zahlenformat muss akzeptiert werden (Live-Lauf-Befund L8)."""
     result = evaluate(_output(budget_rahmen="317.829,00 EUR"))
+    assert result.hart_pass is True
+
+
+def test_hart_pass_budget_live_text_with_highest_tender():
+    """Zuschlag + höchstes Angebot im Fliesstext (Live-Lauf) → Hart Pass."""
+    budget = (
+        "Zuschlagssumme laut Bescheid: 317.829,00 EUR "
+        "(Total- und Payable Amount). Das höchste Angebot lag bei 858.074,65 EUR."
+    )
+    result = evaluate(_output(budget_rahmen=budget))
     assert result.hart_pass is True
 
 
@@ -122,8 +128,15 @@ def test_hart_fail_budget_hoechstes_angebot_german():
     assert result.hart_pass is False
 
 
+def test_hart_fail_budget_hoechstes_as_ceiling_without_award():
+    result = evaluate(
+        _output(budget_rahmen="Budgetrahmen bis 858.074,65 EUR")
+    )
+    assert result.hart_pass is False
+
+
 # ---------------------------------------------------------------------------
-# Hartes Kriterium 2: meilensteine nicht leer
+# Hart: meilensteine nicht leer
 # ---------------------------------------------------------------------------
 
 
@@ -143,7 +156,7 @@ def test_hart_pass_ein_meilenstein_mit_start():
 
 
 # ---------------------------------------------------------------------------
-# Hartes Kriterium 3+4: beide Laufzeitdaten
+# Hart: beide Laufzeitdaten
 # ---------------------------------------------------------------------------
 
 
@@ -156,9 +169,7 @@ def test_hart_pass_beide_daten():
 
 def test_hart_fail_start_fehlt():
     result = evaluate(
-        _output(
-            meilensteine=[{"bezeichnung": "Ende", "zieltermin": END_DATE}]
-        )
+        _output(meilensteine=[{"bezeichnung": "Ende", "zieltermin": END_DATE}])
     )
     assert result.hart_pass is False
     assert any(START_DATE in d for d in result.hart_details)
@@ -166,12 +177,48 @@ def test_hart_fail_start_fehlt():
 
 def test_hart_fail_end_fehlt():
     result = evaluate(
-        _output(
-            meilensteine=[{"bezeichnung": "Start", "zieltermin": START_DATE}]
-        )
+        _output(meilensteine=[{"bezeichnung": "Start", "zieltermin": START_DATE}])
     )
     assert result.hart_pass is False
     assert any(END_DATE in d for d in result.hart_details)
+
+
+# ---------------------------------------------------------------------------
+# Unbelegt: weitere Meilensteindaten
+# ---------------------------------------------------------------------------
+
+
+def test_unbelegt_placeholder_award_date():
+    result = evaluate(
+        _output(
+            meilensteine=[
+                {"bezeichnung": "Start", "zieltermin": START_DATE},
+                {"bezeichnung": "Ende", "zieltermin": END_DATE},
+                {"bezeichnung": "Award", "zieltermin": "2000-01-01"},
+            ]
+        )
+    )
+    assert result.hart_pass is True
+    assert any("2000-01-01" in u for u in result.unbelegt)
+
+
+def test_unbelegt_publication_date():
+    result = evaluate(
+        _output(
+            meilensteine=[
+                {"bezeichnung": "Start", "zieltermin": START_DATE},
+                {"bezeichnung": "Ende", "zieltermin": END_DATE},
+                {"bezeichnung": "TED", "zieltermin": "2025-04-29"},
+            ]
+        )
+    )
+    assert result.hart_pass is True
+    assert any("2025-04-29" in u for u in result.unbelegt)
+
+
+def test_unbelegt_leer_wenn_nur_laufzeit():
+    result = evaluate(_output())
+    assert result.unbelegt == ()
 
 
 # ---------------------------------------------------------------------------
@@ -210,8 +257,17 @@ def test_keine_schwach_ohne_marker():
 
 
 # ---------------------------------------------------------------------------
-# Kombinierter Lauf
+# Abgrenzung zu Justitia / kombinierter Lauf
 # ---------------------------------------------------------------------------
+
+
+def test_justitia_hart_pass_fixture_fails_ihp_hart():
+    """Justitia-Hart (leere Meilensteine, budget None) ist IHP-Hart-Fail. Kein L6-Import."""
+    import pmi.eval_ihp as mod
+
+    assert not hasattr(mod, "KAPITEL7_SAETZE")
+    result = evaluate(_output(budget_rahmen=None, meilensteine=[]))
+    assert result.hart_pass is False
 
 
 def test_hart_pass_schwach_leer_vollstaendig():
@@ -220,3 +276,4 @@ def test_hart_pass_schwach_leer_vollstaendig():
     assert result.hart_pass is True
     assert result.hart_details == ()
     assert result.schwach == ()
+    assert result.unbelegt == ()
