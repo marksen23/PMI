@@ -823,12 +823,13 @@ Echter Kern, echte SQLite; nur LLM-Provider Fake/Patch. Assertions B3:
 
 1. [x] Plan inkl. A–D freigegeben (A1 B3 C1 D1), decided_by human:markus.
 2. [x] Rote Tests freigegeben.
-3. [x] Implementierung grün: `test_draft_atomicity` 7 passed; volle Suite folgt.
+3. [x] Implementierung grün: `176 passed` (volle Suite, 2026-10-03).
 
 ## Testausgabe (Haltepunkt 3)
 
 ```
 tests/test_draft_atomicity.py: 7 passed
+176 passed in 228.40s
 ```
 
 A1: `generate_proposal` ausserhalb TX; `_persist_draft_tx` eine TX.
