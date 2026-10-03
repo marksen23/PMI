@@ -943,7 +943,7 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 # Auftrag 9 – Live-E2E über CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – Abnahme-Checkliste vorgelegt, warte auf Freigabe**  
+Status: **Haltepunkt 3 – Implementierung / Live-Lauf (HP2 freigegeben)**  
 Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
 Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
 (Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
@@ -1010,7 +1010,7 @@ Keine neuen Tests (E1). Suite unverändert; Fake-Demo (`make demo`) bleibt.
 ## Haltepunkte
 
 1. [x] Plan + A–E freigegeben (human:markus) → A1 B1 C2 D1 E1.
-2. [ ] Abnahme-Checkliste L1–L10 – **warte auf Freigabe**, bevor Skript/Live-Lauf.
+2. [x] Abnahme-Checkliste L1–L10 freigegeben (human:markus).
 3. [ ] Implementierung (`live_demo.sh` + README) + Live-Lauf + Bericht; Suite grün.
 
 ## Nicht in diesem Auftrag
