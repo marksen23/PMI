@@ -757,3 +757,87 @@ claude/agent/temporal = 44 passed.
 - answers / K4 (A2)
 - Live-Lauf gegen PDF (nur wenn Mark extra freigibt)
 - Reconciliation-Strategie `DIVERGENT` (Abschnitt 12, PROVISIONAL `none`)
+
+---
+
+# Auftrag 7b – Atomarität draft_proposal (Nachzug PR #11)
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)**  
+Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).
+
+## Entscheidungen A–D (freigegeben human:markus, 2026-10-03 16:08 Europe/Berlin)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | LLM+Validierung ausserhalb TX; eine TX für Proposal + AGENT + DRAFT |
+| **B** | **B3** | B1 Prozessabbruch (wie C1–C4) und B2 Halbstand ohne Kill |
+| **C** | **C1** | Test `offene_fragen` → Abschnitt in `steckbrief.md` |
+| **D** | **D1** | `PMI_FAKE_LLM_JSON=""` = unset; Fake ausserhalb pytest nur mit `PMI_ALLOW_FAKE_LLM=1` |
+
+## Problem
+
+Seit `822fa1c` schreibt `activity_draft_proposal` nicht mehr atomar:
+
+1. `run_agent` → `insert_proposal` (eigener `commit`)
+2. `run_agent` → `append_audit(AGENT_PROPOSAL_GENERATED)` (eigener `commit`)
+3. Activity → `append_audit(DRAFT_PROPOSAL)` (eigener `commit`)
+
+Dedup liest nur Schritt 3. Absturz dazwischen → Retry ohne `DRAFT_PROPOSAL` →
+zweiter LLM-Aufruf, zweites Proposal. Das verletzt Auftrag 2
+(„Retry erzeugt keine zweite Zeile“).
+
+## Ziel
+
+Retry nach Abbruch zwischen den Writes: kein zweites Proposal, kein zweiter
+LLM-Aufruf. A1-Atomarität (+ Recovery für Halbstand B2). Schema unverändert;
+kein Auth/Status durch LLM; `decided_by` nur `human:`.
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/agent.py                   Persistenz aufspalten (A1)
+src/pmi/db.py                      TX-fähige Writes ohne Zwischen-commit
+src/pmi/temporal/activities.py     eine TX; Fault-Points; Recovery Halbstand
+src/pmi/fault_inject.py            unverändert nutzen
+tests/test_draft_atomicity.py      B1/B2/C1/D1
+tests/worker_draft_proposal.py     Subprozess für B1-SIGKILL
+```
+
+## Tests (Haltepunkt 2)
+
+Echter Kern, echte SQLite; nur LLM-Provider Fake/Patch. Assertions B3:
+`COUNT(Proposal)=1`, ein Provider-Aufruf, gleiche `proposal_id`.
+
+| Test | Soll |
+|---|---|
+| `test_draft_retry_after_partial_writes_no_second_proposal` | B2: Proposal+AGENT ohne DRAFT → Retry |
+| `test_draft_retry_after_agent_audit_before_draft_audit` | B2: Abbruch zwischen 2 und 3 |
+| `test_draft_sigkill_after_proposal_insert` | B1: Fault nach Proposal |
+| `test_draft_sigkill_after_agent_audit` | B1: Fault nach AGENT-Audit |
+| `test_offene_fragen_in_steckbrief_md` | C1 |
+| `test_empty_fake_json_is_unset` | D1 |
+| `test_fake_requires_allow_outside_pytest` | D1 |
+
+## Haltepunkte
+
+1. [x] Plan inkl. A–D freigegeben (A1 B3 C1 D1), decided_by human:markus.
+2. [x] Rote Tests freigegeben.
+3. [x] Implementierung grün: `176 passed` (volle Suite, 2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_draft_atomicity.py: 7 passed
+176 passed in 228.40s
+```
+
+A1: `generate_proposal` ausserhalb TX; `_persist_draft_tx` eine TX.
+Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
+
+## Nicht in diesem Auftrag
+
+- UI / Deploy / CLI-Bedienpfad (Auftrag 8)
+- answers / K4
+- Schemaänderung `ProposalOutput`
+- Evaluator im Workflow
