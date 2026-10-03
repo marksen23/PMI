@@ -1,0 +1,67 @@
+# Lokal starten: Temporal (+ optional UI / Worker)
+# Host: localhost:7233  Queue-Default: pmi-initiation (PMI_TASK_QUEUE)
+
+services:
+  postgresql:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+    ports:
+      - "7233:7233"
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    depends_on:
+      - temporal
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:8080
+    ports:
+      - "8080:8080"
+
+  # Optional: PMI-Worker im Compose-Netz (FakeLLM oder Live-Key per ENV)
+  pmi-worker:
+    profiles: ["worker"]
+    image: python:3.12-slim
+    working_dir: /workspace
+    volumes:
+      - .:/workspace
+    environment:
+      - PMI_TEMPORAL_HOST=temporal:7233
+      - PMI_TASK_QUEUE=${PMI_TASK_QUEUE:-pmi-initiation}
+      - PMI_DB_PATH=${PMI_DB_PATH:-/workspace/pmi_control.db}
+      - PMI_REPO_PATH=${PMI_REPO_PATH:-/workspace}
+      - PMI_AUTHORIZATION_HMAC_SECRET=${PMI_AUTHORIZATION_HMAC_SECRET:?set PMI_AUTHORIZATION_HMAC_SECRET}
+      - PMI_FAKE_LLM_JSON=${PMI_FAKE_LLM_JSON:-}
+      - PMI_ALLOW_FAKE_LLM=${PMI_ALLOW_FAKE_LLM:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - PYTHONPATH=/workspace:/workspace/src
+    depends_on:
+      - temporal
+    command: >
+      bash -c "pip install -q -e '.[dev]' &&
+      python -m pmi.temporal.worker"
+
+volumes:
+  temporal-pg:

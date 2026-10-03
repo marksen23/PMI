@@ -847,7 +847,7 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
+Status: **Haltepunkt 3 – Implementierung (Freigabe HP2 erteilt)**  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
@@ -916,7 +916,7 @@ tests/test_cli_bedienpfad.py   neu
 ## Haltepunkte
 
 1. [x] A–F und G1–G5 freigegeben (human:markus).
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
+2. [x] Rote Tests – Freigabe erteilt (human:markus).
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
 ## Nicht in diesem Auftrag
