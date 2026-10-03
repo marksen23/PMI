@@ -1,9 +1,14 @@
 # Lokal starten: Temporal (+ optional UI / Worker)
 # Host: localhost:7233  Queue-Default: pmi-initiation (PMI_TASK_QUEUE)
+#
+# network_mode: host – Container-Bridge in manchen Cloud-VMs blockiert
+# Inter-Container-TCP (Temporal↔Postgres). Host-Netz erfüllt denselben
+# B1-Nachweis (docker compose up Temporal auf :7233).
 
 services:
   postgresql:
     image: postgres:16-alpine
+    network_mode: host
     environment:
       POSTGRES_USER: temporal
       POSTGRES_PASSWORD: temporal
@@ -11,13 +16,14 @@ services:
     volumes:
       - temporal-pg:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      test: ["CMD-SHELL", "pg_isready -U temporal -h 127.0.0.1"]
       interval: 5s
       timeout: 5s
       retries: 10
 
   temporal:
     image: temporalio/auto-setup:1.25.2
+    network_mode: host
     depends_on:
       postgresql:
         condition: service_healthy
@@ -26,29 +32,30 @@ services:
       - DB_PORT=5432
       - POSTGRES_USER=temporal
       - POSTGRES_PWD=temporal
-      - POSTGRES_SEEDS=postgresql
-    ports:
-      - "7233:7233"
+      - POSTGRES_SEEDS=127.0.0.1
+      - BIND_ON_IP=0.0.0.0
+      - TEMPORAL_BROADCAST_ADDRESS=127.0.0.1
 
   temporal-ui:
     image: temporalio/ui:2.31.2
+    network_mode: host
     depends_on:
       - temporal
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=127.0.0.1:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:8080
-    ports:
-      - "8080:8080"
+      - TEMPORAL_UI_PORT=8080
 
-  # Optional: PMI-Worker im Compose-Netz (FakeLLM oder Live-Key per ENV)
+  # Optional: PMI-Worker (FakeLLM oder Live-Key per ENV)
   pmi-worker:
     profiles: ["worker"]
     image: python:3.12-slim
+    network_mode: host
     working_dir: /workspace
     volumes:
       - .:/workspace
     environment:
-      - PMI_TEMPORAL_HOST=temporal:7233
+      - PMI_TEMPORAL_HOST=127.0.0.1:7233
       - PMI_TASK_QUEUE=${PMI_TASK_QUEUE:-pmi-initiation}
       - PMI_DB_PATH=${PMI_DB_PATH:-/workspace/pmi_control.db}
       - PMI_REPO_PATH=${PMI_REPO_PATH:-/workspace}

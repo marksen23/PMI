@@ -27,3 +27,9 @@ Auftrag 7b A1: LLM ausserhalb; eine TX für Proposal+AGENT+DRAFT. Zusätzlich
 `DRAFT_STAGING` (committed vor der TX), damit Retry nach Kill/Rollback keinen
 zweiten LLM-Aufruf braucht (B1/B3). Leeres `PMI_FAKE_LLM_JSON` = unset; Fake
 ausserhalb pytest nur mit `PMI_ALLOW_FAKE_LLM=1` (D1).
+
+## D5 – docker-compose Temporal mit network_mode: host (2026-10-03)
+
+Auftrag 9 B1: Temporal bleibt per `docker compose` auf :7233. Compose nutzt
+`network_mode: host`, weil Container-Bridge in der Cloud-VM Inter-Container-TCP
+(Temporal↔Postgres) droppt. Keine Änderung am PMI-Kern.

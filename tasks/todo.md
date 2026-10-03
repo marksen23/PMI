@@ -847,7 +847,7 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (Merge PR #12 → `9947cb6`).  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
@@ -937,3 +937,109 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 - Schemaänderung an `ProposalOutput`
 - Live-LLM-Lauf (Tests: FakeLLM)
 - `docker compose up` in CI (nur Datei/Struktur)
+
+---
+
+# Auftrag 9 – Live-E2E über CLI (Plan)
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
+Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
+Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
+(Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
+ohne K4/answers, ohne Schemaänderung.
+
+## Entscheidungen (freigegeben human:markus, 2026-10-03)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | `scripts/live_demo.sh` + README-Abschnitt |
+| **B** | **B1** | echter `docker compose up` Temporal Pflicht für Abnahme |
+| **C** | **C2** | `pmi eval` im Live-Lauf optional |
+| **D** | **D1** | K4/answers bleibt zu (eigener Auftrag) |
+| **E** | **E1** | keine neuen pytest für Live (Key/Host ausserhalb Suite) |
+
+## Ist-Stand
+
+| Baustein | Stand |
+|---|---|
+| CLI Bedienpfad init/start/show/approve/run/status/eval/worker | grün (A8) |
+| Temporal + docker-compose | Datei vorhanden; Live-up nicht in Suite |
+| `ClaudeLLMProvider` + Workspace-Header | vorhanden; Live-Läufe früher für Eval |
+| FakeLLM-Härtung D1 | `PMI_ALLOW_FAKE_LLM` nötig ausserhalb pytest |
+| Evaluators Justitia/IHP/ND | CLI `pmi eval`, nicht im Workflow (A7 C1) |
+
+## Soll-Ablauf (nach Freigabe HP3)
+
+```
+docker compose up Temporal                 # B1
+pmi init + pmi worker                      # ohne FakeLLM
+pmi start "<Live-Aufgabe>"                 # Claude draft_proposal
+pmi show  [optional: pmi eval …]           # C2
+pmi approve <id> <person>
+pmi run <id>
+pmi status → APPLIED (+ Steckbrief im Store)
+Bericht in tasks/todo.md
+```
+
+## Dateien (nach Freigabe HP2 → HP3)
+
+```
+scripts/live_demo.sh     A1: Live-Durchstich (compose + worker + CLI)
+README.md                Abschnitt Live-E2E / Voraussetzungen
+tasks/todo.md            Bericht nach Lauf
+```
+
+Keine neuen Tests (E1). Suite unverändert; Fake-Demo (`make demo`) bleibt.
+
+## Abnahme-Checkliste (Haltepunkt 2)
+
+| # | Soll | Nachweis |
+|---|---|---|
+| L1 | `docker compose up` startet Temporal auf `localhost:7233` | compose ps / Port |
+| L2 | Worker ohne `PMI_ALLOW_FAKE_LLM` und ohne `PMI_FAKE_LLM_JSON` | ENV im Skript/Lauf |
+| L3 | `ANTHROPIC_API_KEY` gesetzt; optional `ANTHROPIC_WORKSPACE_ID` | nur Umgebung |
+| L4 | `pmi start` → `request_id` / `workflow_id` / `proposal_id` | stdout |
+| L5 | Proposal `proposed_by=agent:llm`, gültiges `ProposalOutput` | DB / `pmi show` |
+| L6 | Keine Authorization vor `pmi approve` | Auth-Count 0 |
+| L7 | Nach approve+run: Request/Execution → APPLIED | `pmi status` |
+| L8 | Steckbrief unter `projekte/<proposal_id>/` im git-Store | Dateien |
+| L9 | Bericht: Modell, IDs, kein Key/Prompt im Repo | `tasks/todo.md` |
+| L10 | `pytest` volle Suite weiterhin grün | Testausgabe |
+
+## Haltepunkte
+
+1. [x] Plan + A–E freigegeben (human:markus) → A1 B1 C2 D1 E1.
+2. [x] Abnahme-Checkliste L1–L10 freigegeben (human:markus).
+3. [x] Implementierung + Live-Lauf + Bericht; Suite `188 passed` (2026-10-03).
+
+## Testausgabe / Live-Bericht (Haltepunkt 3)
+
+```
+scripts/live_demo.sh EXIT 0
+workflow_id=pmi-97f4c0d6-af59-428c-b32d-16d9b8916852
+request_id=72fe29a5-e3ed-4fd9-b4a6-880c2b1ea6e2
+proposal_id=84222964-d7f9-48f0-abce-e55bf35e745e
+proposed_by=agent:llm
+model=claude-sonnet-5-5  (AGENT_PROPOSAL_GENERATED)
+execution_status=APPLIED
+steckbrief=projekte/<proposal_id>/steckbrief.md (+ proposal.json, risikoliste.md)
+FakeLLM=off; Auth vor approve=0; nach approve Auth-Count=1
+Temporal: docker compose (D5 network_mode: host) 127.0.0.1:7233
+pytest: 188 passed in 225.33s
+```
+
+Hinweis: `ExecutionRequest.status` blieb OPEN; `Execution.status=APPLIED`
+(wie CLI `pmi status` ausgibt). Kein Key/Prompt im Repo.
+
+Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM).
+
+## Nicht in diesem Auftrag
+
+- UI / Frontend / Deploy-Hosting
+- LangGraph, Policy-Engine
+- K4 / answers (D1)
+- Schemaänderung `ProposalOutput`
+- Evaluator im Temporal-Workflow (bleibt C1 aus A7)
+- Abschnitt-12-Entscheidungen (`DIVERGENT` etc.)
+- Neue pytest-Live-Tests (E1)
