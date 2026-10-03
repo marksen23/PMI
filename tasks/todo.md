@@ -847,72 +847,82 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – F3-Umfang OFFEN, Tests gestoppt**  
+Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
 
-## Entscheidungen A–F (human:markus, 2026-10-03 17:28 Europe/Berlin)
+## Entscheidungen (human:markus)
 
 | ID | Wahl | Kurz |
 |---|---|---|
-| **A** | **A1** | `pmi start` blockiert bis `ExecutionRequest` in DB, Exit 0 mit IDs |
-| **B** | **B1** | `pmi show <request_id>` → Proposal JSON (stdout) |
+| **A** | **A1** | `pmi start` blockiert bis `ExecutionRequest`, Exit 0 mit IDs |
+| **B** | **B1** | `pmi show` → Proposal JSON |
 | **C** | **C1** | `status`: Request immer; Execution falls vorhanden; OPEN + IDs |
-| **D** | **D1** | `PMI_TEMPORAL_HOST` / `PMI_TASK_QUEUE` (Defaults localhost:7233 / pmi-initiation) |
-| **E** | **E2** | `pmi eval <justitia\|ihp\|nd_bed> <request_id>` – nur Report |
-| **F** | **F3** | erweitert – **im Plan nicht konkret definiert** → siehe OFFEN G unten |
+| **D** | **D1** | `PMI_TEMPORAL_HOST` / `PMI_TASK_QUEUE` |
+| **E** | **E2** | `pmi eval <justitia\|ihp\|nd_bed> <request_id>` |
+| **F** | **F3** | = G1+G2+G3+G4+G5 (2026-10-03 17:31) |
 
-## F3 – OFFEN (konkretisieren vor Haltepunkt 2)
+### F3 / G (freigegeben)
 
-Im Plan steht nur `F3: erweitert um … (Mark)`. Kein fester Umfang.
-Rote Tests und Implementierung starten **erst nach Freigabe von G**.
+- **G1** README Bedienung Start→Show→Approve→Run→Status→Eval  
+- **G2** `pmi worker` liest Host/Queue aus ENV (D1)  
+- **G3** `docker-compose` Temporal (+ optional Worker); README „Lokal starten“  
+- **G4** `pmi init` legt Kontroll-DB-Schema an `PMI_DB_PATH` an  
+- **G5** `make demo` oder `scripts/demo.sh` FakeLLM-Durchstich  
 
-Basis ohne F3-Zusatz wäre F1: CLI-Bedienpfad + kurze README
-(`start` / `show` / `approve` / `run` / `status` / `eval` laut A–E).
+G3-Tests: nur Struktur (Datei + Service-Namen), kein `docker compose up` in der Suite.
 
-Bitte G wählen (Mehrfachauswahl möglich, z. B. `G1+G2+G4`):
-
-- **G1** – F1-Kern + README (Bedienung Start→Show→Approve→Run→Status→Eval).  
-  Kein UI, kein Deploy.
-- **G2** – `pmi worker`-Einstieg / dokumentierter Worker-Start über ENV (D1);
-  kein Docker.
-- **G3** – `docker-compose` für Temporal (+ optional Worker) und kurzer
-  README-Abschnitt „Lokal starten“.
-- **G4** – CLI `pmi init` / DB-Schema-Anlage am angegebenen `PMI_DB_PATH`
-  (nur Kontroll-DB, kein Status durch LLM).
-- **G5** – Durchstich-Skript oder Make-Ziel `make demo` (FakeLLM, ohne Live-Key):
-  start→show→approve→run→status einmalig.
-- **G6** – andere Erweiterung (Mark nennt sie).
-- **G0** – F3 = inhaltlich F1 (nur README + Bedienpfad inkl. eval aus E2);
-  kein Deploy/Docker/UI.
-
-## Soll-Bedienpfad (A–E, ohne unklaren F3-Zusatz)
+## Soll-Bedienpfad
 
 ```
-1. Temporal + Worker laufen (Queue aus config/ENV, D1)
-2. pmi start "<task>"     → A1: wartet bis create_request, druckt IDs
-3. pmi show <request_id>  → B1: Proposal JSON
-4. pmi approve <request_id> <person>
-5. pmi run <request_id>   → Signal authorized
-6. pmi status <request_id>→ C1: Request + ggf. Execution
-7. pmi eval <which> <request_id> → E2: Report only
+1. Temporal + Worker (D1/G2/G3)
+2. pmi init                  → G4
+3. pmi start "<task>"        → A1
+4. pmi show <request_id>     → B1
+5. pmi approve / run / status→ C1
+6. pmi eval …                → E2
+7. make demo / scripts/demo  → G5
 ```
 
-Invarianten: CLI erzeugt keine Authorization ausser über `approve`;
-`decided_by` nur `human:`; kein LLM setzt Status; `ProposalOutput` unverändert;
-kein Kern-Mock in Invarianten-/Absturztests.
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/cli.py                 start, show, status, init, eval, worker
+src/pmi/temporal/worker.py     Host/Queue aus ENV
+config.py                      TEMPORAL_HOST / TASK_QUEUE PROVISIONAL Defaults
+README.md                      Bedienung + Lokal starten (G1/G3)
+docker-compose.yml             Temporal (+ optional Worker) (G3)
+Makefile oder scripts/demo.sh  FakeLLM-Durchstich (G5)
+tests/test_cli_bedienpfad.py   neu
+```
+
+## Tests (Haltepunkt 2)
+
+| Test | Soll |
+|---|---|
+| `test_start_creates_workflow_and_request` | A1: Request + workflow_id + Proposal agent:llm |
+| `test_start_prints_ids` | stdout: request_id, workflow_id, proposal_id |
+| `test_start_does_not_create_authorization` | Auth-Count 0 |
+| `test_show_prints_proposal_json` | B1: gültiges Proposal JSON |
+| `test_status_open_request` | C1: Request-Status OPEN + IDs, ohne Execution |
+| `test_worker_uses_env_host_and_queue` | G2/D1 |
+| `test_eval_justitia_no_authorization` | E2: Report, Auth unverändert 0 |
+| `test_init_creates_schema` | G4 |
+| `test_readme_documents_bedienpfad` | G1 |
+| `test_docker_compose_declares_temporal` | G3 Struktur |
+| `test_demo_entry_exists` | G5 Makefile-Ziel oder scripts/demo.sh |
 
 ## Haltepunkte
 
-1. [x] A–F freigegeben (A1 B1 C1 D1 E2 F3); **F3-Detail = OFFEN G – warte**.
-2. [ ] Rote Tests – erst nach Freigabe G.
+1. [x] A–F und G1–G5 freigegeben (human:markus).
+2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
-## Nicht in diesem Auftrag (bis G etwas anderes freigibt)
+## Nicht in diesem Auftrag
 
 - UI / Frontend
 - LangGraph, Policy-Engine, K4/answers
 - Schemaänderung an `ProposalOutput`
 - Live-LLM-Lauf (Tests: FakeLLM)
-- Deploy/Docker nur wenn G3 (oder Mark in G6)
+- `docker compose up` in CI (nur Datei/Struktur)
