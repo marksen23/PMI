@@ -633,18 +633,19 @@ PDF lokal unter `it-projekte/` (gitignored).
 - **F** Apostroph ’→' vor ZUORDNUNG.
 - Report-Pfade = Herkunft (`steckbrief.…`), nicht `fakten[…]`.
 
-## Dateien (Haltepunkt 2)
+## Dateien
 
 - `src/pmi/nd_bed_management_reference.py` – REFERENZLISTE / Sätze
-- `src/pmi/nd_bed_management_adapter.py` – Stub (`NotImplementedError`)
-- `src/pmi/eval_nd_bed_management.py` – Stub (`NotImplementedError`)
+- `src/pmi/nd_bed_management_adapter.py` – KEY-Zeilen → fakten/aussagen
+- `src/pmi/eval_nd_bed_management.py` – `evaluate() → NdBedEval`
 - `tests/test_eval_nd_bed_management.py` – T01–T24
 
 ## Haltepunkte
 
 1. [x] Plan inkl. A–F freigegeben.
-2. [ ] Rote Tests T01–T24 – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung Adapter + Evaluator – erst nach Freigabe von 2.
+2. [x] Rote Tests T01–T24 freigegeben.
+3. [x] Implementierung grün: 25 passed in `test_eval_nd_bed_management.py`
+   (gesamt mit Justitia/IHP: 65 passed).
 
 ## Nicht in diesem Auftrag
 
@@ -652,3 +653,125 @@ PDF lokal unter `it-projekte/` (gitignored).
 - Schemaänderung an ProposalOutput
 - Authorization/Status/decided_by
 - Varianz-Nachrechnung als HART
+
+---
+
+# Auftrag 7 – Agentenarchitektur schliessen (Plan)
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – warte auf Freigabe**  
+Ziel: KI-Plattform für Projektmanagement – Agentenpfad von Aufgabe bis
+genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
+
+## Ist-Stand (Inventur)
+
+| Baustein | Stand |
+|---|---|
+| Sicherheitskern (DB, Approval, Zustandsmaschine, CAS-Git) | grün |
+| `run_agent` + `ProposalOutput` + `FakeLLMProvider` | vorhanden |
+| `ClaudeLLMProvider` (max_tokens 16384, Workspace-Header) | vorhanden |
+| `GitProjectStoreAdapter._apply_steckbrief` | vorhanden (`steckbrief` im Payload) |
+| Prüfer Justitia / IHP / ND Bed | grün, ausserhalb Temporal |
+| Temporal `InitiationWorkflow` | läuft; Schritt 2 (`answers`) fehlt |
+| Activity `draft_proposal` | **Stub** (`action/path/scope`, `proposed_by=agent:stub`) |
+| Provider `content[0].text` | bricht bei ThinkingBlock |
+
+Lücke: Temporal-Draft erzeugt kein LLM-`ProposalOutput`. Der Store-Pfad für
+Steckbriefe existiert schon; der Workflow nutzt ihn nicht.
+
+## Soll-Ablauf (nach Freigabe)
+
+```
+task
+  → draft_proposal: run_agent(Claude|Fake) → Proposal + Audit AGENT_PROPOSAL_GENERATED
+  → [OFFEN A] optional answers, wenn offene_fragen nicht leer
+  → create_request (Payload = ProposalOutput, Hash gebunden)
+  → wait authorized | EXPIRED
+  → begin_execution (Kern prüft HMAC/Bindung/Verbrauch)
+  → apply_write → _apply_steckbrief → projekte/<id>/ im git-Store
+  → verify_write / reconcile
+  → Status aus Kontroll-DB
+```
+
+Invarianten bleiben: keine Authorization/Status aus LLM; `decided_by` nur
+`human:`; echte SQLite + echtes git in Invarianten-/Absturztests.
+
+## Entscheidungen – OFFEN (Mark)
+
+Nicht selbst treffen. Freigabe bitte als Buchstaben A–F (oder Ablehnung).
+
+- **A – answers / offene_fragen**  
+  A1: wie Auftrag-2-Plan: warten + `answers`-Signal, Persistenz nur `append_audit`,
+  keine neue Proposal-Version (K4 bleibt zu).  
+  A2: Schritt 2 weglassen; `offene_fragen` nur im Steckbrief speichern.  
+  A3: K4 jetzt: Antworten erzeugen neue Proposal-Version vor `create_request`.
+
+- **B – ThinkingBlock im Provider**  
+  B1: alle `TextBlock`s konkatenieren; Thinking/andere Blöcke ignorieren.  
+  B2: ersten `TextBlock` nehmen; Fail wenn keiner.  
+  (Live-Skript hatte den Bug schon; Provider noch nicht.)
+
+- **C – Evaluator im Workflow**  
+  C1: nicht in diesem Auftrag (Prüfer bleiben CLI/Skript).  
+  C2: optionale Activity nach Draft, Ergebnis nur Audit, nie Auth/Status.  
+  C3: C2 + Prüferwahl über Workflow-Input (`justitia|ihp|nd_bed|none`).
+
+- **D – draft_proposal Timeouts (PROVISIONAL vorschlagen)**  
+  D1: `start_to_close=120s`, `maximum_attempts=3` (Netz/LLM).  
+  D2: andere Werte (Mark nennt sie).  
+  Stub-Tests behalten kurze Override-Fristen.
+
+- **E – Test-Provider**  
+  E1: Temporal-Tests weiter mit `FakeLLMProvider` (festes JSON); Live nur mit
+  Key + Workspace in der Umgebung.  
+  E2: anderer Schnitt (Mark nennt ihn).
+
+- **F – Scope dieser Lieferung**  
+  F1: nur Agentenarchitektur (Draft→Approve→Steckbrief-Store), kein UI, kein Deploy,
+  kein LangGraph, keine Policy-Engine.  
+  F2: erweitert um … (Mark nennt Zusatz).
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/claude_provider.py          ThinkingBlock-Fix (B)
+src/pmi/temporal/activities.py      draft_proposal → run_agent; Dedup unverändert
+src/pmi/temporal/workflow.py        Timeout D; optional Schritt 2 (A)
+tests/test_claude_provider.py       TextBlock / ThinkingBlock
+tests/test_temporal_agent.py        neu: FakeLLM → Steckbrief-Apply, Invarianten
+config.py                           nur wenn D neue PROVISIONAL-Konstanten braucht
+```
+
+Kein neues Spezifikationsdokument. Abweichung von Skizze Abschnitt 11
+(„kein echter LLM im Agent“ / „kein Temporal“) bereits durch Auftrag 2/3
+überholt; bei neuer Abweichung kurzer Eintrag in `docs/decisions.md`.
+
+## Tests (Haltepunkt 2, nach Freigabe von 1)
+
+Rote Tests vor Implementierung. Echte DB + git; Kern nicht mocken.
+
+| Test | Soll |
+|---|---|
+| `test_draft_uses_run_agent_payload` | Proposal in DB ist `ProposalOutput`; `proposed_by=agent:llm`; kein `touch_file` |
+| `test_draft_dedup_returns_same_proposal` | Retry derselben step/dedup → dieselbe proposal_id, ein Audit |
+| `test_apply_steckbrief_after_approve` | FakeLLM-Draft → approve → apply → Dateien unter `projekte/<id>/`; Status APPLIED |
+| `test_llm_creates_no_authorization` | nach Draft: Authorization-Count 0, kein Statuswechsel |
+| `test_provider_skips_thinking_block` | Fake-Response mit Thinking+Text → nur Text (B) |
+| `test_answers_*` | nur wenn A1 oder A3 gewählt |
+
+Bestehende Temporal-/Crash-/Evaluator-Suite bleibt grün.
+
+## Haltepunkte
+
+1. [ ] Dieser Plan inkl. A–F – **warte auf Freigabe**.
+2. [ ] Rote Tests – vorlegen, auf Freigabe warten.
+3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+
+## Nicht in diesem Auftrag (außer F2)
+
+- UI / Frontend
+- Deploy / Hosting
+- LangGraph, Policy-Engine
+- Schemaänderung an `ProposalOutput`
+- Live-Lauf gegen PDF (nur wenn Mark extra freigibt)
+- Reconciliation-Strategie `DIVERGENT` (Abschnitt 12, PROVISIONAL `none`)
