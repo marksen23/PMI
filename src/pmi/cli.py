@@ -312,6 +312,27 @@ def _cmd_eval(args: list[str]) -> None:
         print(json.dumps(result, ensure_ascii=False, default=str))
 
 
+def _workflow_id_for_proposal(conn, proposal_id: str) -> str | None:
+    """workflow_id aus DRAFT_PROPOSAL-Audit (dedup_key = {wf}:{step}:{type})."""
+    import json
+
+    rows = conn.execute(
+        "SELECT dedup_key, payload_json FROM AuditEvent "
+        "WHERE event_type='DRAFT_PROPOSAL' ORDER BY created_at DESC"
+    ).fetchall()
+    for row in rows:
+        try:
+            data = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        if data.get("proposal_id") != proposal_id:
+            continue
+        parts = str(row["dedup_key"]).rsplit(":", 2)
+        if len(parts) == 3 and parts[0]:
+            return parts[0]
+    return None
+
+
 def _cmd_answers(args: list[str]) -> None:
     """A3: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]"""
     if "--" not in args or len(args) < 3:
@@ -330,16 +351,59 @@ def _cmd_answers(args: list[str]) -> None:
     proposal_id = args[0]
     person = args[1]
     answers = args[sep + 1 :]
+    import asyncio
+
+    from temporalio.client import Client
+
     from pmi.answers import apply_answers
+    from pmi.temporal.workflow import InitiationWorkflow
 
     conn = _get_db()
-    result = apply_answers(
-        conn,
-        proposal_id=proposal_id,
-        answers=answers,
-        person=person,
-    )
+    try:
+        result = apply_answers(
+            conn,
+            proposal_id=proposal_id,
+            answers=answers,
+            person=person,
+        )
+    except ValueError as exc:
+        conn.close()
+        print(f"answers: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    workflow_id = _workflow_id_for_proposal(conn, proposal_id)
     conn.close()
+
+    # Befund 4: wartenden Workflow per answers-Signal weiterschalten
+    if workflow_id:
+        host = _env("PMI_TEMPORAL_HOST", "localhost:7233")
+
+        async def _signal() -> None:
+            client = await Client.connect(host)
+            handle = client.get_workflow_handle(workflow_id)
+            await handle.signal(
+                InitiationWorkflow.answers,
+                {"answers": answers, "person": person},
+            )
+
+        try:
+            # CLI ist sync; aus laufendem Loop (pytest-asyncio) in Thread auslagern
+            try:
+                asyncio.get_running_loop()
+                in_loop = True
+            except RuntimeError:
+                in_loop = False
+            if in_loop:
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                    pool.submit(lambda: asyncio.run(_signal())).result(timeout=60)
+            else:
+                asyncio.run(_signal())
+        except Exception as exc:
+            print(f"answers: Signal fehlgeschlagen: {exc}", file=sys.stderr)
+            sys.exit(1)
+
     print(f"proposal_id={proposal_id} version={result['version']}")
 
 

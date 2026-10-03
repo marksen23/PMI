@@ -305,16 +305,23 @@ class ApplyAnswersResult:
 
 @_activity.defn(name="apply_answers")
 async def activity_apply_answers(args: ApplyAnswersInput) -> ApplyAnswersResult:
+    from temporalio.exceptions import ApplicationError
+
     from pmi.answers import apply_answers
 
     conn = get_db(args.db_path)
     init_schema(conn)
-    result = apply_answers(
-        conn,
-        proposal_id=args.proposal_id,
-        answers=list(args.answers),
-        person=args.person,
-    )
+    try:
+        result = apply_answers(
+            conn,
+            proposal_id=args.proposal_id,
+            answers=list(args.answers),
+            person=args.person,
+        )
+    except ValueError as exc:
+        conn.close()
+        # Business-Regel (Person/D1/Fragen) – nicht retryen (Befund 6)
+        raise ApplicationError(str(exc), non_retryable=True) from exc
     row = conn.execute(
         "SELECT payload_json FROM Proposal WHERE id=? AND version=?",
         (args.proposal_id, result["version"]),
@@ -345,39 +352,53 @@ async def activity_create_request(args: CreateRequestInput) -> CreateRequestResu
     conn = get_db(args.db_path)
     init_schema(conn)
 
-    row = conn.execute(
-        "SELECT payload_json, version FROM Proposal WHERE id=? "
-        "ORDER BY version DESC LIMIT 1",
-        (args.proposal_id,),
-    ).fetchone()
-    payload = json.loads(row["payload_json"])
-    proposal_version = int(row["version"])
-
     head = _sp.check_output(
         ["git", "rev-parse", "HEAD"], cwd=args.repo_path
     ).decode().strip()
 
-    request_id = insert_request(
-        conn,
-        proposal_id=args.proposal_id,
-        proposal_version=proposal_version,
-        payload=payload,
-        expected_revision=head,
-        workflow_id=args.workflow_id,
-    )
-    req_row = conn.execute(
-        "SELECT request_hash FROM ExecutionRequest WHERE id=?", (request_id,)
-    ).fetchone()
-    request_hash = req_row["request_hash"]
+    # BEGIN IMMEDIATE: Race mit apply_answers → eine konsistente Welt (D1 / Befund 3)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT payload_json, version FROM Proposal WHERE id=? "
+            "ORDER BY version DESC LIMIT 1",
+            (args.proposal_id,),
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        proposal_version = int(row["version"])
 
-    append_audit(
-        conn,
-        _dedup(args.workflow_id, args.step, "CREATE_REQUEST"),
-        "CREATE_REQUEST",
-        None,
-        0,
-        {"request_id": request_id},
-    )
+        request_id = insert_request(
+            conn,
+            proposal_id=args.proposal_id,
+            proposal_version=proposal_version,
+            payload=payload,
+            expected_revision=head,
+            workflow_id=args.workflow_id,
+            commit=False,
+        )
+        req_row = conn.execute(
+            "SELECT request_hash FROM ExecutionRequest WHERE id=?", (request_id,)
+        ).fetchone()
+        request_hash = req_row["request_hash"]
+
+        append_audit(
+            conn,
+            _dedup(args.workflow_id, args.step, "CREATE_REQUEST"),
+            "CREATE_REQUEST",
+            None,
+            0,
+            {"request_id": request_id},
+            commit=False,
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        conn.close()
+        raise
+
     conn.close()
     return CreateRequestResult(
         request_id=request_id,

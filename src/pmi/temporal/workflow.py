@@ -97,7 +97,14 @@ class InitiationWorkflow:
 
         # Schritt 2: answers nur wenn offene_fragen nicht leer (A3/D1)
         if questions:
-            await workflow.wait_condition(lambda: self._answers is not None)
+            try:
+                await workflow.wait_condition(
+                    lambda: self._answers is not None,
+                    timeout=timedelta(seconds=args.approval_timeout_seconds),
+                )
+            except Exception:
+                # Timeout ohne Signal → EXPIRED, kein ExecutionRequest (Befund 2)
+                return WorkflowResult(status="EXPIRED")
             answers_payload = self._answers or {}
             applied: ApplyAnswersResult = await workflow.execute_activity(
                 activity_apply_answers,

@@ -34,7 +34,9 @@ def init_schema(conn: sqlite3.Connection) -> None:
             status                TEXT NOT NULL DEFAULT 'OPEN',
             workflow_id           TEXT,
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
-            consumed_by_execution_id TEXT
+            consumed_by_execution_id TEXT,
+            FOREIGN KEY (proposal_id, proposal_version)
+                REFERENCES Proposal(id, version)
         );
 
         CREATE TABLE IF NOT EXISTS Authorization (
@@ -95,39 +97,147 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def _migrate_proposal_composite_pk(conn: sqlite3.Connection) -> None:
-    """Alte DBs: Proposal.id war alleiniger PK → (id, version)."""
+def _table_sql(conn: sqlite3.Connection, name: str) -> str:
     row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Proposal'"
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
+        (name,),
     ).fetchone()
     if row is None or row["sql"] is None:
-        return
-    sql = " ".join(row["sql"].split())
-    if "PRIMARY KEY (id, version)" in sql:
-        return
-    conn.executescript(
+        return ""
+    return " ".join(row["sql"].split())
+
+
+def _er_fk_ok(er_sql: str) -> bool:
+    return (
+        "REFERENCES Proposal(id, version)" in er_sql
+        or "REFERENCES Proposal (id, version)" in er_sql
+    )
+
+
+def _recreate_execution_request_with_fk(conn: sqlite3.Connection) -> None:
+    """ExecutionRequest neu mit FK auf Proposal(id, version); Daten behalten."""
+    conn.execute(
         """
-        CREATE TABLE Proposal__k4 (
-            id           TEXT NOT NULL,
-            version      INTEGER NOT NULL DEFAULT 1,
-            proposed_by  TEXT NOT NULL,
-            payload_json TEXT NOT NULL,
-            diff_json    TEXT NOT NULL DEFAULT '',
-            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-            PRIMARY KEY (id, version)
-        );
-        INSERT INTO Proposal__k4 (id, version, proposed_by, payload_json, diff_json, created_at)
-        SELECT id,
-               COALESCE(version, 1),
-               proposed_by,
-               payload_json,
-               COALESCE(diff_json, ''),
-               COALESCE(created_at, datetime('now'))
-        FROM Proposal;
-        DROP TABLE Proposal;
-        ALTER TABLE Proposal__k4 RENAME TO Proposal;
+        CREATE TABLE ExecutionRequest__k4 (
+            id                    TEXT PRIMARY KEY,
+            proposal_id           TEXT NOT NULL,
+            proposal_version      INTEGER NOT NULL,
+            request_hash          TEXT NOT NULL,
+            expected_revision     TEXT NOT NULL DEFAULT '',
+            status                TEXT NOT NULL DEFAULT 'OPEN',
+            workflow_id           TEXT,
+            created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+            consumed_by_execution_id TEXT,
+            FOREIGN KEY (proposal_id, proposal_version)
+                REFERENCES Proposal(id, version)
+        )
         """
     )
+    cols = {
+        r[1] for r in conn.execute("PRAGMA table_info(ExecutionRequest)").fetchall()
+    }
+    # Spalten der Legacy-Tabelle auf Zielschema abbilden
+    select_bits = [
+        "id",
+        "proposal_id",
+        "proposal_version",
+        "request_hash",
+        "COALESCE(expected_revision, '')" if "expected_revision" in cols else "''",
+        "COALESCE(status, 'OPEN')" if "status" in cols else "'OPEN'",
+        "workflow_id" if "workflow_id" in cols else "NULL",
+        "COALESCE(created_at, datetime('now'))" if "created_at" in cols else "datetime('now')",
+        "consumed_by_execution_id" if "consumed_by_execution_id" in cols else "NULL",
+    ]
+    conn.execute(
+        "INSERT INTO ExecutionRequest__k4 ("
+        "id, proposal_id, proposal_version, request_hash, expected_revision, "
+        "status, workflow_id, created_at, consumed_by_execution_id) "
+        f"SELECT {', '.join(select_bits)} FROM ExecutionRequest"
+    )
+    conn.execute("DROP TABLE ExecutionRequest")
+    conn.execute("ALTER TABLE ExecutionRequest__k4 RENAME TO ExecutionRequest")
+
+
+def _migrate_proposal_composite_pk(conn: sqlite3.Connection) -> None:
+    """Alte DBs: Proposal.id alleiniger PK → (id, version); ER-FK atomar mitziehen.
+
+    Wiederanlauf: liegengebliebene Proposal__k4 wird verworfen und Migration neu gefahren.
+    """
+    names = {
+        r[0]
+        for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        ).fetchall()
+    }
+    if "Proposal" not in names and "Proposal__k4" not in names:
+        return
+
+    prop_sql = _table_sql(conn, "Proposal") if "Proposal" in names else ""
+    has_composite = "PRIMARY KEY (id, version)" in prop_sql
+    has_k4 = "Proposal__k4" in names
+    er_sql = _table_sql(conn, "ExecutionRequest") if "ExecutionRequest" in names else ""
+    er_needs_fk = bool(er_sql) and not _er_fk_ok(er_sql)
+
+    if has_composite and not has_k4 and not er_needs_fk:
+        return
+
+    # FK aus – sonst scheitert DROP Proposal bei referenzierenden Requests
+    conn.execute("PRAGMA foreign_keys=OFF")
+    # Sicherstellen, dass keine implizite TX offen ist
+    conn.commit()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if has_k4:
+            conn.execute("DROP TABLE Proposal__k4")
+
+        if not has_composite and "Proposal" in names:
+            conn.execute(
+                """
+                CREATE TABLE Proposal__k4 (
+                    id           TEXT NOT NULL,
+                    version      INTEGER NOT NULL DEFAULT 1,
+                    proposed_by  TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    diff_json    TEXT NOT NULL DEFAULT '',
+                    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+                    PRIMARY KEY (id, version)
+                )
+                """
+            )
+            prop_cols = {
+                r[1] for r in conn.execute("PRAGMA table_info(Proposal)").fetchall()
+            }
+            diff_expr = (
+                "COALESCE(diff_json, '')" if "diff_json" in prop_cols else "''"
+            )
+            created_expr = (
+                "COALESCE(created_at, datetime('now'))"
+                if "created_at" in prop_cols
+                else "datetime('now')"
+            )
+            version_expr = (
+                "COALESCE(version, 1)" if "version" in prop_cols else "1"
+            )
+            conn.execute(
+                "INSERT INTO Proposal__k4 "
+                "(id, version, proposed_by, payload_json, diff_json, created_at) "
+                f"SELECT id, {version_expr}, proposed_by, payload_json, "
+                f"{diff_expr}, {created_expr} FROM Proposal"
+            )
+            conn.execute("DROP TABLE Proposal")
+            conn.execute("ALTER TABLE Proposal__k4 RENAME TO Proposal")
+
+        # ER-FK nachziehen (auch wenn Proposal schon composite war)
+        er_sql_now = _table_sql(conn, "ExecutionRequest")
+        if er_sql_now and not _er_fk_ok(er_sql_now):
+            _recreate_execution_request_with_fk(conn)
+
+        conn.commit()
+    except Exception:
+        conn.execute("ROLLBACK")
+        conn.execute("PRAGMA foreign_keys=ON")
+        raise
+    conn.execute("PRAGMA foreign_keys=ON")
 
 
 def _check_no_floats(obj: object, path: str = "") -> None:
@@ -182,6 +292,8 @@ def insert_request(
     payload: dict,
     expected_revision: str = "",
     workflow_id: str | None = None,
+    *,
+    commit: bool = True,
 ) -> str:
     """Erstellt einen ExecutionRequest. expected_revision = aktueller Store-Stand (git HEAD).
 
@@ -202,7 +314,8 @@ def insert_request(
                 "UPDATE ExecutionRequest SET workflow_id=? WHERE id=? AND workflow_id IS NULL",
                 (workflow_id, existing["id"]),
             )
-            conn.commit()
+            if commit:
+                conn.commit()
         return existing["id"]
     request_id = str(uuid.uuid4())
     conn.execute(
@@ -211,7 +324,8 @@ def insert_request(
         "VALUES (?, ?, ?, ?, ?, ?)",
         (request_id, proposal_id, proposal_version, request_hash, revision, workflow_id),
     )
-    conn.commit()
+    if commit:
+        conn.commit()
     return request_id
 
 
