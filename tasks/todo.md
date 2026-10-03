@@ -1011,7 +1011,28 @@ Keine neuen Tests (E1). Suite unverändert; Fake-Demo (`make demo`) bleibt.
 
 1. [x] Plan + A–E freigegeben (human:markus) → A1 B1 C2 D1 E1.
 2. [x] Abnahme-Checkliste L1–L10 freigegeben (human:markus).
-3. [ ] Implementierung (`live_demo.sh` + README) + Live-Lauf + Bericht; Suite grün.
+3. [x] Implementierung + Live-Lauf + Bericht; Suite `188 passed` (2026-10-03).
+
+## Testausgabe / Live-Bericht (Haltepunkt 3)
+
+```
+scripts/live_demo.sh EXIT 0
+workflow_id=pmi-97f4c0d6-af59-428c-b32d-16d9b8916852
+request_id=72fe29a5-e3ed-4fd9-b4a6-880c2b1ea6e2
+proposal_id=84222964-d7f9-48f0-abce-e55bf35e745e
+proposed_by=agent:llm
+model=claude-sonnet-5-5  (AGENT_PROPOSAL_GENERATED)
+execution_status=APPLIED
+steckbrief=projekte/<proposal_id>/steckbrief.md (+ proposal.json, risikoliste.md)
+FakeLLM=off; Auth vor approve=0; nach approve Auth-Count=1
+Temporal: docker compose (D5 network_mode: host) 127.0.0.1:7233
+pytest: 188 passed in 225.33s
+```
+
+Hinweis: `ExecutionRequest.status` blieb OPEN; `Execution.status=APPLIED`
+(wie CLI `pmi status` ausgibt). Kein Key/Prompt im Repo.
+
+Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM).
 
 ## Nicht in diesem Auftrag
 
