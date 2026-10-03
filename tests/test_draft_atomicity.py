@@ -94,15 +94,14 @@ async def _crash_before_draft_audit(
     workflow_id: str,
     provider: CountingFake,
 ) -> str:
-    """Erster Versuch: bricht nach AGENT-Audit vor DRAFT_PROPOSAL ab (Halbstand)."""
-    import pmi.agent as agent_mod
+    """Erster Versuch: bricht in der Persistenz-TX vor DRAFT_PROPOSAL ab.
+
+    A1: TX wird zurückgerollt; Staging (committed) hält proposal_id + Payload,
+    damit Retry ohne zweiten LLM-Aufruf dieselbe id fortsetzt.
+    """
     import pmi.temporal.activities as activities_mod
 
-    real_agent_audit = agent_mod.append_audit
     real_activity_audit = activities_mod.append_audit
-
-    def agent_audit(*args, **kwargs):
-        return real_agent_audit(*args, **kwargs)
 
     def activity_audit(conn, dedup_key, event_type, *args, **kwargs):
         if event_type == "DRAFT_PROPOSAL":
@@ -110,30 +109,29 @@ async def _crash_before_draft_audit(
         return real_activity_audit(conn, dedup_key, event_type, *args, **kwargs)
 
     with _patch_counting(provider):
-        with patch.object(agent_mod, "append_audit", side_effect=agent_audit):
-            with patch.object(activities_mod, "append_audit", side_effect=activity_audit):
-                with pytest.raises(RuntimeError, match="simulated crash"):
-                    await activity_draft_proposal(
-                        DraftProposalInput(
-                            task="Halbstand-Aufgabe",
-                            db_path=str(db_path),
-                            step=1,
-                            workflow_id=workflow_id,
-                        )
+        with patch.object(activities_mod, "append_audit", side_effect=activity_audit):
+            with pytest.raises(RuntimeError, match="simulated crash"):
+                await activity_draft_proposal(
+                    DraftProposalInput(
+                        task="Halbstand-Aufgabe",
+                        db_path=str(db_path),
+                        step=1,
+                        workflow_id=workflow_id,
                     )
+                )
 
     assert provider.calls == 1
-    assert _proposal_count(db_path) == 1
     conn = get_db(str(db_path))
-    proposal_id = conn.execute("SELECT id FROM Proposal").fetchone()[0]
-    n_agent = conn.execute(
-        "SELECT COUNT(*) FROM AuditEvent WHERE event_type='AGENT_PROPOSAL_GENERATED'"
-    ).fetchone()[0]
+    staging_key = f"{workflow_id}:1:DRAFT_STAGING"
+    staging = conn.execute(
+        "SELECT payload_json FROM AuditEvent WHERE dedup_key=?", (staging_key,)
+    ).fetchone()
+    assert staging is not None, "Staging muss den LLM-Stand überleben"
+    proposal_id = json.loads(staging["payload_json"])["proposal_id"]
     n_draft = conn.execute(
         "SELECT COUNT(*) FROM AuditEvent WHERE event_type='DRAFT_PROPOSAL'"
     ).fetchone()[0]
     conn.close()
-    assert n_agent == 1
     assert n_draft == 0
     return proposal_id
 

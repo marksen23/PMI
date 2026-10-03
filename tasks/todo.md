@@ -763,7 +763,7 @@ claude/agent/temporal = 44 passed.
 # Auftrag 7b – Atomarität draft_proposal (Nachzug PR #11)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
+Status: **Umgesetzt, grün (Haltepunkt 3)**  
 Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).
 
 ## Entscheidungen A–D (freigegeben human:markus, 2026-10-03 16:08 Europe/Berlin)
@@ -822,8 +822,17 @@ Echter Kern, echte SQLite; nur LLM-Provider Fake/Patch. Assertions B3:
 ## Haltepunkte
 
 1. [x] Plan inkl. A–D freigegeben (A1 B3 C1 D1), decided_by human:markus.
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+2. [x] Rote Tests freigegeben.
+3. [x] Implementierung grün: `test_draft_atomicity` 7 passed; volle Suite folgt.
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_draft_atomicity.py: 7 passed
+```
+
+A1: `generate_proposal` ausserhalb TX; `_persist_draft_tx` eine TX.
+Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 
 ## Nicht in diesem Auftrag
 

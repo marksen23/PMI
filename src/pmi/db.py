@@ -112,14 +112,22 @@ def compute_request_hash(payload: dict, expected_revision: str = "") -> str:
     return hashlib.sha256(canonical + b"|" + rev_bytes).hexdigest()
 
 
-def insert_proposal(conn: sqlite3.Connection, payload: dict, proposed_by: str) -> str:
-    proposal_id = str(uuid.uuid4())
+def insert_proposal(
+    conn: sqlite3.Connection,
+    payload: dict,
+    proposed_by: str,
+    *,
+    proposal_id: str | None = None,
+    commit: bool = True,
+) -> str:
+    pid = proposal_id or str(uuid.uuid4())
     conn.execute(
         "INSERT INTO Proposal (id, proposed_by, payload_json) VALUES (?, ?, ?)",
-        (proposal_id, proposed_by, json.dumps(payload)),
+        (pid, proposed_by, json.dumps(payload)),
     )
-    conn.commit()
-    return proposal_id
+    if commit:
+        conn.commit()
+    return pid
 
 
 def insert_request(
@@ -169,6 +177,8 @@ def append_audit(
     execution_id: str | None,
     seq: int,
     payload: dict,
+    *,
+    commit: bool = True,
 ) -> None:
     event_id = str(uuid.uuid4())
     try:
@@ -177,6 +187,7 @@ def append_audit(
             "VALUES (?, ?, ?, ?, ?, ?)",
             (event_id, dedup_key, event_type, execution_id, seq, json.dumps(payload)),
         )
-        conn.commit()
+        if commit:
+            conn.commit()
     except sqlite3.IntegrityError:
         pass  # dedup_key bereits vorhanden – idempotent
