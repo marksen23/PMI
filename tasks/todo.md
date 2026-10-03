@@ -1125,14 +1125,17 @@ tests/test_k4_answers.py           neu (HP2)
 2. [x] Rote Tests abgenommen (human:markus, 2026-10-03).
    Vor HP3: `pytest tests/test_k4_answers.py` 9 failed, 1 passed (7.07s).
 3. [x] Implementierung grün: `tests/test_k4_answers.py` 10 passed;
-   Regression (Kern/CLI/Eval/Temporal-Subset) 119 passed.
+   volle Suite `198 passed` (2026-10-03).
 
 ## Testausgabe (Haltepunkt 3)
 
 ```
-tests/test_k4_answers.py .......... 10 passed
-pytest subset (k4+eval+core_1b+cli+agent+temporal) 119 passed
+tests/test_k4_answers.py: 10 passed in 1.11s
+198 passed in 228.23s (0:03:48)
 ```
+
+A3 Signal+CLI; B1 v2+Diff+neuer Request-Hash; C3 `human:`; D1 vor create_request;
+E1 Request-Status unverändert; F1 ohne UI/Live.
 
 ## Nicht in diesem Auftrag
 
