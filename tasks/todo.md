@@ -763,10 +763,17 @@ claude/agent/temporal = 44 passed.
 # Auftrag 7b – Atomarität draft_proposal (Nachzug PR #11)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – warte auf Freigabe**  
-Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).  
-Freigabe durch Markus für den Review-Befund liegt vor; Entscheidungen A–D unten
-bleiben OFFEN bis zur Plan-Freigabe.
+Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
+Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).
+
+## Entscheidungen A–D (freigegeben human:markus, 2026-10-03 16:08 Europe/Berlin)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | LLM+Validierung ausserhalb TX; eine TX für Proposal + AGENT + DRAFT |
+| **B** | **B3** | B1 Prozessabbruch (wie C1–C4) und B2 Halbstand ohne Kill |
+| **C** | **C1** | Test `offene_fragen` → Abschnitt in `steckbrief.md` |
+| **D** | **D1** | `PMI_FAKE_LLM_JSON=""` = unset; Fake ausserhalb pytest nur mit `PMI_ALLOW_FAKE_LLM=1` |
 
 ## Problem
 
@@ -778,80 +785,44 @@ Seit `822fa1c` schreibt `activity_draft_proposal` nicht mehr atomar:
 
 Dedup liest nur Schritt 3. Absturz dazwischen → Retry ohne `DRAFT_PROPOSAL` →
 zweiter LLM-Aufruf, zweites Proposal. Das verletzt Auftrag 2
-(„Retry erzeugt keine zweite Zeile“).  
-`test_draft_dedup_returns_same_proposal` prüft nur Retry nach vollem Erfolg.
+(„Retry erzeugt keine zweite Zeile“).
 
 ## Ziel
 
-Retry von `draft_proposal` nach Abbruch an jeder Stelle zwischen den Writes
-erzeugt kein zweites Proposal und keinen zweiten LLM-Aufruf. Writes wieder
-atomar oder gleichwertig idempotent. `ProposalOutput`-Schema unverändert;
+Retry nach Abbruch zwischen den Writes: kein zweites Proposal, kein zweiter
+LLM-Aufruf. A1-Atomarität (+ Recovery für Halbstand B2). Schema unverändert;
 kein Auth/Status durch LLM; `decided_by` nur `human:`.
-
-## Entscheidungen – OFFEN (Markus)
-
-Nicht selbst treffen.
-
-- **A – Atomarität / Idempotenz**  
-  A1: LLM-Aufruf und Validierung **ausserhalb** der DB-TX; danach **eine**
-  Transaktion: Proposal + `AGENT_PROPOSAL_GENERATED` + `DRAFT_PROPOSAL`
-  (`run_agent` Persistenz aufspalten oder TX-fähige Schreib-API).  
-  A2: `run_agent` erhält den Temporal-`dedup_key` und schreibt alle drei
-  Zeilen selbst in einer TX; Activity nur noch Aufruf + Return.  
-  A3: Vor dem LLM ein `DRAFT_PROPOSAL`-Platzhalter (oder Lookup-Schlüssel);
-  Retry erkennt Teilstand und setzt fort, ohne zweiten LLM-Call.  
-  A4: andere Variante (Markus nennt sie).
-
-- **B – Crash-Nachweis (Haltepunkt 2)**  
-  B1: gezielter Abbruch nach Proposal-Insert / nach AGENT-Audit / vor
-  DRAFT-Audit (Fault-Hook oder Prozesskill); Retry → eine Proposal-Zeile,
-  ein LLM-Call (Zähler am Fake-Provider), Dedup hält.  
-  B2: nur DB-Zustand nach simuliertem Halbfertig-Stand + erneutem Activity-Aufruf
-  (ohne Kill), gleiche Assertions.  
-  B3: B1 und B2.
-
-- **C – Nebenbei A2: `offene_fragen` in `steckbrief.md`**  
-  C1: ja, ein Test (FakeLLM mit nicht-leerer `offene_fragen` → Apply →
-  Abschnitt in `steckbrief.md`).  
-  C2: nicht in diesem Auftrag.
-
-- **D – Nebenbei E1-Härtung** (nur Optionen; nicht selbst entscheiden)  
-  D1: leerer String `PMI_FAKE_LLM_JSON=""` gilt als unset (kein Fake);
-  Fake ausserhalb pytest nur mit explizitem `PMI_ALLOW_FAKE_LLM=1`.  
-  D2: Fake nur wenn `PYTEST_CURRENT_TEST` gesetzt; sonst immer Claude.  
-  D3: nicht in diesem Auftrag.  
-  D4: andere (Markus).
 
 ## Dateien (nach Freigabe der Tests)
 
 ```
-src/pmi/agent.py                 Persistenz/TX je nach A
-src/pmi/db.py                    ggf. insert ohne Auto-Commit / TX-Helfer
-src/pmi/temporal/activities.py   atomarer/idempotenter draft_proposal
-tests/test_temporal_agent.py     Crash-/Halbstand-Retry; optional C1
-src/pmi/temporal/… oder config   nur wenn D ≠ D3
+src/pmi/agent.py                   Persistenz aufspalten (A1)
+src/pmi/db.py                      TX-fähige Writes ohne Zwischen-commit
+src/pmi/temporal/activities.py     eine TX; Fault-Points; Recovery Halbstand
+src/pmi/fault_inject.py            unverändert nutzen
+tests/test_draft_atomicity.py      B1/B2/C1/D1
+tests/worker_draft_proposal.py     Subprozess für B1-SIGKILL
 ```
 
-Kein neues Spezifikationsdokument. Kurzer `docs/decisions.md`-Eintrag nur bei
-Abweichung von Auftrag-2-Zusage-Formulierung.
+## Tests (Haltepunkt 2)
 
-## Tests (Haltepunkt 2, nach Freigabe von 1)
-
-Echter Kern, echte SQLite; nur LLM-Provider gepatcht/Fake. Kein Mock von
-Adapter/Zustandsmaschine/Approval.
+Echter Kern, echte SQLite; nur LLM-Provider Fake/Patch. Assertions B3:
+`COUNT(Proposal)=1`, ein Provider-Aufruf, gleiche `proposal_id`.
 
 | Test | Soll |
 |---|---|
-| `test_draft_retry_after_partial_writes_no_second_proposal` | Halbfertig (Proposal und/oder AGENT-Audit ohne DRAFT) → Retry → `COUNT(Proposal)=1`, ein Provider-Aufruf, Return gleiche `proposal_id` |
-| `test_draft_retry_after_agent_audit_before_draft_audit` | Abbruch genau zwischen Schritt 2 und 3 → gleiches |
-| `test_draft_dedup_after_full_success` | bestehend, bleibt grün |
-| `test_offene_fragen_in_steckbrief_md` | nur bei C1 |
-| E1-Härtungs-Tests | nur bei D1/D2/D4 |
+| `test_draft_retry_after_partial_writes_no_second_proposal` | B2: Proposal+AGENT ohne DRAFT → Retry |
+| `test_draft_retry_after_agent_audit_before_draft_audit` | B2: Abbruch zwischen 2 und 3 |
+| `test_draft_sigkill_after_proposal_insert` | B1: Fault nach Proposal |
+| `test_draft_sigkill_after_agent_audit` | B1: Fault nach AGENT-Audit |
+| `test_offene_fragen_in_steckbrief_md` | C1 |
+| `test_empty_fake_json_is_unset` | D1 |
+| `test_fake_requires_allow_outside_pytest` | D1 |
 
 ## Haltepunkte
 
-1. [ ] Dieser Plan inkl. A–D – **warte auf Freigabe**.
-2. [ ] Rote Tests – vorlegen, auf Freigabe warten.
+1. [x] Plan inkl. A–D freigegeben (A1 B3 C1 D1), decided_by human:markus.
+2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
 ## Nicht in diesem Auftrag
