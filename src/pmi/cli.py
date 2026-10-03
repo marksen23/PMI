@@ -145,6 +145,7 @@ def _cmd_show(args: list[str]) -> None:
     row = conn.execute(
         "SELECT p.payload_json FROM ExecutionRequest er "
         "JOIN Proposal p ON p.id = er.proposal_id "
+        "AND p.version = er.proposal_version "
         "WHERE er.id=?",
         (request_id,),
     ).fetchone()
@@ -283,6 +284,7 @@ def _cmd_eval(args: list[str]) -> None:
     row = conn.execute(
         "SELECT p.payload_json FROM ExecutionRequest er "
         "JOIN Proposal p ON p.id = er.proposal_id "
+        "AND p.version = er.proposal_version "
         "WHERE er.id=?",
         (request_id,),
     ).fetchone()
@@ -311,15 +313,34 @@ def _cmd_eval(args: list[str]) -> None:
 
 
 def _cmd_answers(args: list[str]) -> None:
-    """Stub Auftrag 10 HP2 – noch keine K4-Persistenz."""
-    print(
-        "Usage: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]",
-        file=sys.stderr,
-    )
-    # Stub: keine v2, kein Signal – Tests sollen an Assertions scheitern.
-    if len(args) < 2:
+    """A3: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]"""
+    if "--" not in args or len(args) < 3:
+        print(
+            "Usage: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]",
+            file=sys.stderr,
+        )
         sys.exit(1)
-    print(f"answers: stub (proposal_id={args[0]})")
+    sep = args.index("--")
+    if sep < 2:
+        print(
+            "Usage: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    proposal_id = args[0]
+    person = args[1]
+    answers = args[sep + 1 :]
+    from pmi.answers import apply_answers
+
+    conn = _get_db()
+    result = apply_answers(
+        conn,
+        proposal_id=proposal_id,
+        answers=answers,
+        person=person,
+    )
+    conn.close()
+    print(f"proposal_id={proposal_id} version={result['version']}")
 
 
 def _cmd_worker(args: list[str]) -> None:

@@ -16,12 +16,13 @@ def get_db(path) -> sqlite3.Connection:
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS Proposal (
-            id          TEXT PRIMARY KEY,
+            id          TEXT NOT NULL,
             version     INTEGER NOT NULL DEFAULT 1,
             proposed_by TEXT NOT NULL,
             payload_json TEXT NOT NULL,
             diff_json   TEXT NOT NULL DEFAULT '',
-            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (id, version)
         );
 
         CREATE TABLE IF NOT EXISTS ExecutionRequest (
@@ -33,8 +34,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             status                TEXT NOT NULL DEFAULT 'OPEN',
             workflow_id           TEXT,
             created_at            TEXT NOT NULL DEFAULT (datetime('now')),
-            consumed_by_execution_id TEXT,
-            FOREIGN KEY (proposal_id) REFERENCES Proposal(id)
+            consumed_by_execution_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS Authorization (
@@ -91,7 +91,43 @@ def init_schema(conn: sqlite3.Connection) -> None:
         conn.execute(
             "ALTER TABLE Proposal ADD COLUMN diff_json TEXT NOT NULL DEFAULT ''"
         )
+    _migrate_proposal_composite_pk(conn)
     conn.commit()
+
+
+def _migrate_proposal_composite_pk(conn: sqlite3.Connection) -> None:
+    """Alte DBs: Proposal.id war alleiniger PK → (id, version)."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='Proposal'"
+    ).fetchone()
+    if row is None or row["sql"] is None:
+        return
+    sql = " ".join(row["sql"].split())
+    if "PRIMARY KEY (id, version)" in sql:
+        return
+    conn.executescript(
+        """
+        CREATE TABLE Proposal__k4 (
+            id           TEXT NOT NULL,
+            version      INTEGER NOT NULL DEFAULT 1,
+            proposed_by  TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            diff_json    TEXT NOT NULL DEFAULT '',
+            created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (id, version)
+        );
+        INSERT INTO Proposal__k4 (id, version, proposed_by, payload_json, diff_json, created_at)
+        SELECT id,
+               COALESCE(version, 1),
+               proposed_by,
+               payload_json,
+               COALESCE(diff_json, ''),
+               COALESCE(created_at, datetime('now'))
+        FROM Proposal;
+        DROP TABLE Proposal;
+        ALTER TABLE Proposal__k4 RENAME TO Proposal;
+        """
+    )
 
 
 def _check_no_floats(obj: object, path: str = "") -> None:
@@ -124,12 +160,15 @@ def insert_proposal(
     proposed_by: str,
     *,
     proposal_id: str | None = None,
+    version: int = 1,
+    diff_json: str = "",
     commit: bool = True,
 ) -> str:
     pid = proposal_id or str(uuid.uuid4())
     conn.execute(
-        "INSERT INTO Proposal (id, proposed_by, payload_json) VALUES (?, ?, ?)",
-        (pid, proposed_by, json.dumps(payload)),
+        "INSERT INTO Proposal (id, version, proposed_by, payload_json, diff_json) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (pid, version, proposed_by, json.dumps(payload), diff_json),
     )
     if commit:
         conn.commit()

@@ -982,7 +982,7 @@ pmi status → APPLIED (+ Steckbrief im Store)
 Bericht in tasks/todo.md
 ```
 
-## Dateien (nach Freigabe HP2 → HP3)
+## Dateien
 
 ```
 scripts/live_demo.sh     A1: Live-Durchstich (compose + worker + CLI)
@@ -1053,7 +1053,7 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 # Auftrag 10 – K4 / answers-Minimalpfad (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests (Assertion-Rot) vorgelegt, warte auf Freigabe**  
+Status: **Umgesetzt, grün (Haltepunkt 3)**  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
 und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
@@ -1092,7 +1092,7 @@ draft_proposal → Proposal v1
 
 Leere `offene_fragen`: kein answers-Warten; create_request auf v1.
 
-## Dateien (nach Freigabe HP2 → HP3)
+## Dateien
 
 ```
 src/pmi/answers.py                 apply_answers (Kern)
@@ -1121,8 +1121,16 @@ tests/test_k4_answers.py           neu (HP2)
 ## Haltepunkte
 
 1. [x] Plan + A–F freigegeben (human:markus) → A3 B1 C3 D1 E1 F1.
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+2. [x] Rote Tests freigegeben.
+3. [x] Implementierung grün: `tests/test_k4_answers.py` 10 passed;
+   Regression (Kern/CLI/Eval/Temporal-Subset) 119 passed.
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_k4_answers.py .......... 10 passed
+pytest subset (k4+eval+core_1b+cli+agent+temporal) 119 passed
+```
 
 ## Nicht in diesem Auftrag
 
