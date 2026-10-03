@@ -1149,12 +1149,19 @@ E1 Request-Status unverändert; F1 ohne UI/Live.
 
 ---
 
-# Auftrag 10 – Review-Nachzug (Implementierung grün, Abnahme offen)
+# Auftrag 10 – Review-Nachzug (abgenommen)
 
 Stand: 2026-10-03  
-Status: **Implementierung grün – warte auf Abnahme**  
-decided_by: human:markus (2026-10-03 21:57 Europe/Berlin)  
-Rote Tests abgenommen; Implementierung freigegeben. PR #17 bleibt Draft.
+Status: **PR #17 abgenommen**  
+decided_by: human:markus (2026-10-03 23:33 Europe/Berlin)  
+Merge durch Markus. Agent merged nicht.
+
+## OFFEN (nicht umsetzen – nur notiert)
+
+1. Eigener answers-Timeout statt Wiederverwendung von `approval_timeout_seconds`.
+2. Breites `except Exception` um `wait_condition` im Workflow – nur Timeout soll `EXPIRED` ergeben.
+3. Idempotenz von `apply_answers` nur über gleichen Antworttext (zu eng / zu lose prüfen).
+4. Signal nach `create_request`: Ablehnung läuft über `apply_answers`; Abdeckung des echten Workflow-Pfads im Test prüfen.
 
 ## Befunde → Soll
 
@@ -1207,4 +1214,5 @@ volle Suite: 214 passed in 232.94s
 
 1. [x] Review-Entscheidung human:markus.
 2. [x] Rote Tests abgenommen (human:markus, 2026-10-03 21:57 Europe/Berlin).
-3. [x] Implementierung grün – **warte auf Abnahme; kein Merge**.
+3. [x] Implementierung grün.
+4. [x] Abnahme PR #17 (human:markus, 2026-10-03 23:33 Europe/Berlin) – Merge durch Markus.
