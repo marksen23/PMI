@@ -61,10 +61,16 @@ _DRAFT_RETRY = RetryPolicy(
 class InitiationWorkflow:
     def __init__(self) -> None:
         self._auth_id: str | None = None
+        self._answers: dict | None = None
 
     @workflow.signal
     def authorized(self, auth_id: str) -> None:
         self._auth_id = auth_id
+
+    @workflow.signal
+    def answers(self, payload: dict) -> None:
+        """Stub Auftrag 10 HP2: Signal registriert, noch kein Wait vor create_request."""
+        self._answers = payload
 
     @workflow.run
     async def run(self, args: WorkflowInput) -> WorkflowResult:
@@ -82,6 +88,9 @@ class InitiationWorkflow:
             start_to_close_timeout=timedelta(seconds=_DRAFT_START_TO_CLOSE),
             retry_policy=_DRAFT_RETRY,
         )
+
+        # Stub HP2: answers-Signal vorhanden, aber noch kein Warten (A7-Pfad).
+        _ = self._answers
 
         # Schritt 3: create_request (liest git HEAD, schreibt ExecutionRequest)
         create: CreateRequestResult = await workflow.execute_activity(

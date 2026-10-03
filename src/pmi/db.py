@@ -20,6 +20,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
             version     INTEGER NOT NULL DEFAULT 1,
             proposed_by TEXT NOT NULL,
             payload_json TEXT NOT NULL,
+            diff_json   TEXT NOT NULL DEFAULT '',
             created_at  TEXT NOT NULL DEFAULT (datetime('now'))
         );
 
@@ -85,6 +86,11 @@ def init_schema(conn: sqlite3.Connection) -> None:
         )
     if "workflow_id" not in req_columns:
         conn.execute("ALTER TABLE ExecutionRequest ADD COLUMN workflow_id TEXT")
+    prop_columns = [row[1] for row in conn.execute("PRAGMA table_info(Proposal)")]
+    if "diff_json" not in prop_columns:
+        conn.execute(
+            "ALTER TABLE Proposal ADD COLUMN diff_json TEXT NOT NULL DEFAULT ''"
+        )
     conn.commit()
 
 

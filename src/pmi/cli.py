@@ -1,4 +1,4 @@
-"""CLI: pmi init / start / show / approve / run / status / eval / worker"""
+"""CLI: pmi init / start / show / approve / run / status / eval / answers / worker"""
 from __future__ import annotations
 
 import sys
@@ -8,7 +8,7 @@ def main() -> None:
     args = sys.argv[1:]
     if not args:
         print(
-            "Usage: pmi <init|start|show|approve|run|status|eval|worker> ...",
+            "Usage: pmi <init|start|show|approve|run|status|eval|answers|worker> ...",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -29,6 +29,8 @@ def main() -> None:
         _cmd_status(rest)
     elif cmd == "eval":
         _cmd_eval(rest)
+    elif cmd == "answers":
+        _cmd_answers(rest)
     elif cmd == "worker":
         _cmd_worker(rest)
     else:
@@ -306,6 +308,18 @@ def _cmd_eval(args: list[str]) -> None:
         print(json.dumps(asdict(result), ensure_ascii=False, default=str))
     else:
         print(json.dumps(result, ensure_ascii=False, default=str))
+
+
+def _cmd_answers(args: list[str]) -> None:
+    """Stub Auftrag 10 HP2 – noch keine K4-Persistenz."""
+    print(
+        "Usage: pmi answers <proposal_id> <person> -- <answer> [<answer> ...]",
+        file=sys.stderr,
+    )
+    # Stub: keine v2, kein Signal – Tests sollen an Assertions scheitern.
+    if len(args) < 2:
+        sys.exit(1)
+    print(f"answers: stub (proposal_id={args[0]})")
 
 
 def _cmd_worker(args: list[str]) -> None:

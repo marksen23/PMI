@@ -145,8 +145,9 @@ async def test_apply_answers_proposed_by_human_prefix(tmp_db_path):
     )
     conn.close()
 
-    v2 = _proposal_versions(tmp_db_path, draft.proposal_id)[1]
-    assert v2["proposed_by"] == "human:markus"
+    versions = _proposal_versions(tmp_db_path, draft.proposal_id)
+    assert len(versions) == 2
+    assert versions[1]["proposed_by"] == "human:markus"
 
 
 def test_apply_answers_empty_person_rejected(tmp_db_path):
@@ -197,15 +198,16 @@ async def test_apply_answers_stores_diff(tmp_db_path):
     )
     conn.close()
 
-    v2 = _proposal_versions(tmp_db_path, draft.proposal_id)[1]
-    assert v2["diff_json"]
-    diff = json.loads(v2["diff_json"])
+    versions = _proposal_versions(tmp_db_path, draft.proposal_id)
+    assert len(versions) == 2
+    assert versions[1]["diff_json"]
+    diff = json.loads(versions[1]["diff_json"])
     assert isinstance(diff, (dict, list))
 
 
 @pytest.mark.asyncio
 async def test_apply_answers_no_authorization(tmp_db_path):
-    """answers erzeugt keine Authorization."""
+    """answers erzeugt v2 und keine Authorization (nicht nur No-op)."""
     from pmi.answers import apply_answers
 
     workflow_id = f"k4-noauth-{uuid.uuid4()}"
@@ -228,6 +230,8 @@ async def test_apply_answers_no_authorization(tmp_db_path):
         person="markus",
     )
     conn.close()
+    versions = _proposal_versions(tmp_db_path, draft.proposal_id)
+    assert len(versions) == 2, "ohne v2 wäre Auth-Count-0 ein leerer Stub-Pass"
     assert _auth_count(tmp_db_path) == before == 0
 
 
@@ -255,19 +259,19 @@ async def test_create_request_after_answers_uses_v2_hash(tmp_db_path, tmp_git_re
         answers=["50k"],
         person="markus",
     )
-    v1_payload = json.loads(
-        conn.execute(
-            "SELECT payload_json FROM Proposal WHERE id=? AND version=1",
-            (draft.proposal_id,),
-        ).fetchone()["payload_json"]
-    )
-    v2_payload = json.loads(
-        conn.execute(
-            "SELECT payload_json FROM Proposal WHERE id=? AND version=2",
-            (draft.proposal_id,),
-        ).fetchone()["payload_json"]
-    )
+    v1_row = conn.execute(
+        "SELECT payload_json FROM Proposal WHERE id=? AND version=1",
+        (draft.proposal_id,),
+    ).fetchone()
+    v2_row = conn.execute(
+        "SELECT payload_json FROM Proposal WHERE id=? AND version=2",
+        (draft.proposal_id,),
+    ).fetchone()
     conn.close()
+    assert v1_row is not None
+    assert v2_row is not None, "v2 fehlt – create_request kann Hash nicht an v2 binden"
+    v1_payload = json.loads(v1_row["payload_json"])
+    v2_payload = json.loads(v2_row["payload_json"])
 
     create = await activity_create_request(
         CreateRequestInput(
@@ -358,8 +362,9 @@ def test_cli_answers_command(tmp_db_path, tmp_git_repo, monkeypatch, capsys):
     assert pid in out
     assert "2" in out or "version=2" in out
 
-    v2 = _proposal_versions(tmp_db_path, pid)[1]
-    assert v2["proposed_by"] == "human:markus"
+    versions = _proposal_versions(tmp_db_path, pid)
+    assert len(versions) == 2
+    assert versions[1]["proposed_by"] == "human:markus"
     assert _auth_count(tmp_db_path) == 0
 
 
@@ -369,8 +374,13 @@ async def test_workflow_waits_for_answers_signal(tmp_db_path, tmp_git_repo):
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
 
+    from pmi.db import init_schema
     from pmi.temporal.activities import ACTIVITIES
     from pmi.temporal.workflow import InitiationWorkflow, WorkflowInput
+
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+    conn.close()
 
     workflow_id = f"k4-wf-{uuid.uuid4()}"
     with _patch_questions(["Workflow-Frage?"]):
@@ -453,8 +463,13 @@ async def test_workflow_skips_answers_when_no_questions(tmp_db_path, tmp_git_rep
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
 
+    from pmi.db import init_schema
     from pmi.temporal.activities import ACTIVITIES
     from pmi.temporal.workflow import InitiationWorkflow, WorkflowInput
+
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+    conn.close()
 
     workflow_id = f"k4-skip-{uuid.uuid4()}"
     with _patch_questions([]):

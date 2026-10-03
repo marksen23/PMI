@@ -1053,7 +1053,7 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 # Auftrag 10 – K4 / answers-Minimalpfad (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
+Status: **Haltepunkt 2 – rote Tests (Assertion-Rot) vorgelegt, warte auf Freigabe**  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
 und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
