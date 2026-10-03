@@ -1053,7 +1053,7 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 # Auftrag 10 – K4 / answers-Minimalpfad (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests (Assertion-Rot) vorgelegt, warte auf Freigabe**  
+Status: **Haltepunkt 2 abgenommen** (human:markus, 2026-10-03). HP3 nicht begonnen.  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
 und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
@@ -1121,7 +1121,12 @@ tests/test_k4_answers.py           neu (HP2)
 ## Haltepunkte
 
 1. [x] Plan + A–F freigegeben (human:markus) → A3 B1 C3 D1 E1 F1.
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
+2. [x] Rote Tests abgenommen (human:markus, 2026-10-03).
+   `pytest tests/test_k4_answers.py`: 9 failed, 1 passed in 7.07s.
+   Die neun scheitern an den Assertions: v2 fehlt (`len == 1`), erwarteter
+   `ValueError` bleibt aus, Request entsteht vor dem answers-Signal.
+   Grün nur `test_workflow_skips_answers_when_no_questions` (v1, bestehender Pfad).
+   Bestand ohne diese Datei: 187 passed, 1 skipped.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
 ## Nicht in diesem Auftrag
