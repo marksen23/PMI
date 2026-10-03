@@ -48,6 +48,22 @@ pmi worker                            # Temporal-Worker
 
 Kurzpfad FakeLLM-Durchstich: `make demo` (siehe `scripts/demo.sh`).
 
+## Live-E2E (echtes Claude + Temporal)
+
+Voraussetzungen: Docker, `ANTHROPIC_API_KEY`, `PMI_AUTHORIZATION_HMAC_SECRET`.
+Optional: `ANTHROPIC_WORKSPACE_ID`. **Kein** `PMI_ALLOW_FAKE_LLM` / `PMI_FAKE_LLM_JSON`.
+
+```bash
+export ANTHROPIC_API_KEY="…"
+export PMI_AUTHORIZATION_HMAC_SECRET="…"
+# optional: export ANTHROPIC_WORKSPACE_ID="…"
+bash scripts/live_demo.sh
+```
+
+Das Skript startet Temporal per `docker compose`, Worker ohne FakeLLM,
+dann `pmi start` → `show` → `approve` → `run` → Status APPLIED und Steckbrief im Store.
+Optional vorher eval: `PMI_LIVE_EVAL=1 bash scripts/live_demo.sh`.
+
 ## Tests
 
 ```bash
