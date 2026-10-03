@@ -943,7 +943,7 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 # Auftrag 9 – Live-E2E über CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03).  
 Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
 Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
 (Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
@@ -1031,6 +1031,10 @@ pytest: 188 passed in 225.33s
 
 Hinweis: `ExecutionRequest.status` blieb OPEN; `Execution.status=APPLIED`
 (wie CLI `pmi status` ausgibt). Kein Key/Prompt im Repo.
+
+Abnahme-Klärung (human:markus, 2026-10-03): OPEN bei Execution=APPLIED ist
+bewusst – Request nur OPEN|EXPIRED; Erfolg auf Execution + `consumed_by_execution_id`.
+Kein K5; kein Fix in diesem PR. Terminaler Request-Status ggf. späterer Auftrag.
 
 Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM).
 

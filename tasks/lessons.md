@@ -129,3 +129,12 @@ Angebot. Unbelegt: Platzhalter 2000-01-01 sowie Meilensteindaten
 2025-04-29, 2025-07-01, 2026-01-01. Prüfer: Auftrag 5 erteilt und umgesetzt (`eval_ihp.evaluate`).
 Der Workspace-Header lag beim Live-Lauf nur im Live-Skript. `ClaudeLLMProvider`
 liest ihn seit PR #6 (`ad10829`) aus der Umgebung.
+
+---
+
+## L9 – ExecutionRequest.status nach Apply (2026-10-03)
+
+`ExecutionRequest.status` ist OPEN|EXPIRED (Wartefenster). Erfolg steht auf
+`Execution.status` (APPLIED) und `consumed_by_execution_id`. OPEN bei
+Execution=APPLIED ist kein Bug und kein K5. Keinen Request-Status APPLIED
+erfinden ohne eigenen Auftrag.
