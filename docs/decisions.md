@@ -18,3 +18,10 @@ und wird im selben INSERT wie der Request geschrieben. Ein gesetzter Wert wird n
 Auftrag 2 nutzte Stub `touch_file`. Auftrag 7: `draft_proposal` → `run_agent` →
 `ProposalOutput`; Apply über `_apply_steckbrief`. Tests steuern den Provider über
 `PMI_FAKE_LLM_JSON` / `get_llm_provider()`. Kein answers-Schritt (A2).
+
+## D4 – draft_proposal Atomarität + Staging (2026-10-03)
+
+Auftrag 7b A1: LLM ausserhalb; eine TX für Proposal+AGENT+DRAFT. Zusätzlich
+`DRAFT_STAGING` (committed vor der TX), damit Retry nach Kill/Rollback keinen
+zweiten LLM-Aufruf braucht (B1/B3). Leeres `PMI_FAKE_LLM_JSON` = unset; Fake
+ausserhalb pytest nur mit `PMI_ALLOW_FAKE_LLM=1` (D1).

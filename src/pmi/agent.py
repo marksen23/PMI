@@ -8,7 +8,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import uuid
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from pydantic import ValidationError as PydanticValidationError
 
@@ -98,17 +100,26 @@ def _sha256_str(s: str) -> str:
     return hashlib.sha256(s.encode("utf-8")).hexdigest()
 
 
-def run_agent(
-    task: str,
-    conn: sqlite3.Connection,
-    provider: LLMProvider,
-) -> tuple[str, ProposalOutput]:
-    """
-    Führt einen LLM-Aufruf durch, validiert die Ausgabe und speichert Proposal + Audit.
+@dataclass(frozen=True)
+class GeneratedProposal:
+    """LLM-Ergebnis nach Validierung – noch nicht in der DB."""
 
-    Returns:
-        (proposal_id, validated_output)
-    """
+    proposal_id: str
+    output: ProposalOutput
+    model: str
+    version: str
+    input_hash: str
+    output_hash: str
+    validated_output_hash: str
+    proposal_input_hash: str
+
+    @property
+    def payload(self) -> dict:
+        return self.output.model_dump(mode="json")
+
+
+def generate_proposal(task: str, provider: LLMProvider) -> GeneratedProposal:
+    """A1: LLM-Aufruf + Validierung ohne DB-Writes."""
     model = provider.model
     version = provider.version
 
@@ -126,31 +137,68 @@ def run_agent(
         raise ValueError(f"LLM-Ausgabe ist kein gültiges JSON: {exc}") from exc
 
     validated: ProposalOutput = ProposalOutput.model_validate(parsed)
-
     validated_output_hash = compute_expected_hash(validated)
 
-    payload = validated.model_dump(mode="json")
-    proposal_id = insert_proposal(conn, payload=payload, proposed_by="agent:llm")
+    return GeneratedProposal(
+        proposal_id=str(uuid.uuid4()),
+        output=validated,
+        model=model,
+        version=version,
+        input_hash=input_hash,
+        output_hash=output_hash,
+        validated_output_hash=validated_output_hash,
+        proposal_input_hash=proposal_input_hash,
+    )
 
-    dedup = f"agent_proposal:{proposal_id}"
+
+def persist_generated_proposal(
+    conn: sqlite3.Connection,
+    generated: GeneratedProposal,
+    *,
+    commit: bool = True,
+) -> str:
+    """Schreibt Proposal + AGENT_PROPOSAL_GENERATED (ohne DRAFT_PROPOSAL)."""
+    insert_proposal(
+        conn,
+        payload=generated.payload,
+        proposed_by="agent:llm",
+        proposal_id=generated.proposal_id,
+        commit=commit,
+    )
     append_audit(
         conn,
-        dedup_key=dedup,
+        dedup_key=f"agent_proposal:{generated.proposal_id}",
         event_type="AGENT_PROPOSAL_GENERATED",
         execution_id=None,
         seq=0,
         payload={
-            "proposal_id": proposal_id,
-            "model": model,
-            "version": version,
-            "input_hash": input_hash,
-            "output_hash": output_hash,
-            "validated_output_hash": validated_output_hash,
-            "proposal_input_hash": proposal_input_hash,
+            "proposal_id": generated.proposal_id,
+            "model": generated.model,
+            "version": generated.version,
+            "input_hash": generated.input_hash,
+            "output_hash": generated.output_hash,
+            "validated_output_hash": generated.validated_output_hash,
+            "proposal_input_hash": generated.proposal_input_hash,
         },
+        commit=commit,
     )
+    return generated.proposal_id
 
-    return proposal_id, validated
+
+def run_agent(
+    task: str,
+    conn: sqlite3.Connection,
+    provider: LLMProvider,
+) -> tuple[str, ProposalOutput]:
+    """
+    Führt einen LLM-Aufruf durch, validiert die Ausgabe und speichert Proposal + Audit.
+
+    Returns:
+        (proposal_id, validated_output)
+    """
+    generated = generate_proposal(task, provider)
+    persist_generated_proposal(conn, generated, commit=True)
+    return generated.proposal_id, generated.output
 
 
 # ---------------------------------------------------------------------------

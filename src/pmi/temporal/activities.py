@@ -8,13 +8,15 @@ from pathlib import Path
 
 import temporalio.activity as _activity
 
-from pmi.agent import FakeLLMProvider, LLMProvider, run_agent
+from pmi.agent import FakeLLMProvider, LLMProvider, generate_proposal
 from pmi.db import (
     append_audit,
     get_db,
     init_schema,
+    insert_proposal,
     insert_request,
 )
+from pmi.fault_inject import maybe_crash
 from pmi.git_adapter import GitProjectStoreAdapter
 from pmi.state_machine import (
     AuthorizationError,
@@ -31,10 +33,13 @@ def _dedup(workflow_id: str, step: int, event_type: str) -> str:
 
 
 def get_llm_provider() -> LLMProvider:
-    """E1: FakeLLM wenn PMI_FAKE_LLM_JSON gesetzt, sonst ClaudeLLMProvider."""
+    """FakeLLM nur mit nicht-leerem JSON und (pytest oder PMI_ALLOW_FAKE_LLM=1)."""
     fake_json = os.environ.get("PMI_FAKE_LLM_JSON", "")
     if fake_json:
-        return FakeLLMProvider(fake_json)
+        in_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        allow_fake = os.environ.get("PMI_ALLOW_FAKE_LLM") == "1"
+        if in_pytest or allow_fake:
+            return FakeLLMProvider(fake_json)
     from pmi.claude_provider import ClaudeLLMProvider
 
     return ClaudeLLMProvider()
@@ -132,41 +137,149 @@ class ReadExecutionStatusInput:
 #    Test-Kontext akzeptabel; direkte Aufrufe aus worker_temporal.py via
 #    asyncio.run()) ──────────────────────────────────────────────────────────
 
+def _load_complete_draft(conn, dedup_key: str) -> DraftProposalResult | None:
+    existing = conn.execute(
+        "SELECT payload_json FROM AuditEvent WHERE dedup_key=?", (dedup_key,)
+    ).fetchone()
+    if not existing:
+        return None
+    data = json.loads(existing["payload_json"])
+    proposal_id = data["proposal_id"]
+    row = conn.execute(
+        "SELECT payload_json FROM Proposal WHERE id=?", (proposal_id,)
+    ).fetchone()
+    if row is None:
+        raise RuntimeError(f"DRAFT_PROPOSAL Dedup ohne Proposal: {proposal_id}")
+    return DraftProposalResult(
+        proposal_id=proposal_id,
+        payload=json.loads(row["payload_json"]),
+    )
+
+
+def _load_staging(conn, staging_key: str) -> dict | None:
+    row = conn.execute(
+        "SELECT payload_json FROM AuditEvent WHERE dedup_key=?", (staging_key,)
+    ).fetchone()
+    if not row:
+        return None
+    return json.loads(row["payload_json"])
+
+
+def _persist_draft_tx(
+    conn,
+    *,
+    staging: dict,
+    dedup_key: str,
+    task: str,
+) -> None:
+    """A1: eine Transaktion für Proposal + AGENT_PROPOSAL_GENERATED + DRAFT_PROPOSAL."""
+    proposal_id = staging["proposal_id"]
+    payload = staging["payload"]
+    agent_key = f"agent_proposal:{proposal_id}"
+
+    conn.execute("BEGIN")
+    try:
+        if not conn.execute(
+            "SELECT 1 FROM Proposal WHERE id=?", (proposal_id,)
+        ).fetchone():
+            insert_proposal(
+                conn,
+                payload=payload,
+                proposed_by="agent:llm",
+                proposal_id=proposal_id,
+                commit=False,
+            )
+        maybe_crash("after_draft_proposal_insert")
+
+        if not conn.execute(
+            "SELECT 1 FROM AuditEvent WHERE dedup_key=?", (agent_key,)
+        ).fetchone():
+            append_audit(
+                conn,
+                dedup_key=agent_key,
+                event_type="AGENT_PROPOSAL_GENERATED",
+                execution_id=None,
+                seq=0,
+                payload={
+                    "proposal_id": proposal_id,
+                    "model": staging["model"],
+                    "version": staging["version"],
+                    "input_hash": staging["input_hash"],
+                    "output_hash": staging["output_hash"],
+                    "validated_output_hash": staging["validated_output_hash"],
+                    "proposal_input_hash": staging["proposal_input_hash"],
+                    "draft_dedup_key": dedup_key,
+                },
+                commit=False,
+            )
+        maybe_crash("after_draft_agent_audit")
+
+        append_audit(
+            conn,
+            dedup_key=dedup_key,
+            event_type="DRAFT_PROPOSAL",
+            execution_id=None,
+            seq=0,
+            payload={"proposal_id": proposal_id, "task": task},
+            commit=False,
+        )
+        conn.commit()
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+
+
 @_activity.defn(name="draft_proposal")
 async def activity_draft_proposal(args: DraftProposalInput) -> DraftProposalResult:
     conn = get_db(args.db_path)
     init_schema(conn)
     dedup_key = _dedup(args.workflow_id, args.step, "DRAFT_PROPOSAL")
-    existing = conn.execute(
-        "SELECT payload_json FROM AuditEvent WHERE dedup_key=?", (dedup_key,)
-    ).fetchone()
-    if existing:
-        data = json.loads(existing["payload_json"])
-        proposal_id = data["proposal_id"]
-        row = conn.execute(
-            "SELECT payload_json FROM Proposal WHERE id=?", (proposal_id,)
-        ).fetchone()
+    staging_key = _dedup(args.workflow_id, args.step, "DRAFT_STAGING")
+
+    complete = _load_complete_draft(conn, dedup_key)
+    if complete is not None:
         conn.close()
-        if row is None:
-            raise RuntimeError(f"DRAFT_PROPOSAL Dedup ohne Proposal: {proposal_id}")
-        return DraftProposalResult(
-            proposal_id=proposal_id,
-            payload=json.loads(row["payload_json"]),
+        return complete
+
+    staging = _load_staging(conn, staging_key)
+    if staging is None:
+        # A1: LLM + Validierung ausserhalb der DB-TX
+        provider = get_llm_provider()
+        generated = generate_proposal(args.task, provider)
+        staging = {
+            "proposal_id": generated.proposal_id,
+            "payload": generated.payload,
+            "model": generated.model,
+            "version": generated.version,
+            "input_hash": generated.input_hash,
+            "output_hash": generated.output_hash,
+            "validated_output_hash": generated.validated_output_hash,
+            "proposal_input_hash": generated.proposal_input_hash,
+            "task": args.task,
+        }
+        # Staging committed vor der TX: Retry nach Kill ohne zweiten LLM-Aufruf
+        append_audit(
+            conn,
+            dedup_key=staging_key,
+            event_type="DRAFT_STAGING",
+            execution_id=None,
+            seq=0,
+            payload=staging,
+            commit=True,
         )
 
-    provider = get_llm_provider()
-    proposal_id, output = run_agent(task=args.task, conn=conn, provider=provider)
-    payload = output.model_dump(mode="json")
-    append_audit(
+    _persist_draft_tx(
         conn,
-        dedup_key,
-        "DRAFT_PROPOSAL",
-        None,
-        0,
-        {"proposal_id": proposal_id, "task": args.task},
+        staging=staging,
+        dedup_key=dedup_key,
+        task=args.task,
+    )
+    result = DraftProposalResult(
+        proposal_id=staging["proposal_id"],
+        payload=staging["payload"],
     )
     conn.close()
-    return DraftProposalResult(proposal_id=proposal_id, payload=payload)
+    return result
 
 
 @_activity.defn(name="create_request")
