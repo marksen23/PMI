@@ -1146,3 +1146,81 @@ E1 Request-Status unverändert; F1 ohne UI/Live.
 - Abschnitt-12 `DIVERGENT`-Reconciliation
 - Terminaler Request-Status (E1 / L9)
 - Live-Skript-Erweiterung (F1)
+
+---
+
+# Auftrag 11 – Live-/Bedienpfad answers (Plan)
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – warte auf Freigabe**  
+Voraussetzung: Auftrag 10 abgenommen (PR #17); K4 Kern grün.  
+Ziel: Den answers-Pfad bedienbar machen und einmal nachweisen – ohne UI,
+ohne LangGraph, ohne Evaluator im Workflow, ohne Abschnitt-12-Entscheidungen.
+
+## Warum jetzt
+
+Nach A10 gilt: Workflow wartet bei nicht-leeren `offene_fragen` auf das
+**Temporal-Signal** `answers`, bevor `create_request` läuft. `pmi start`
+wartet dagegen auf einen `ExecutionRequest` und hängt bei offenen Fragen.
+`pmi answers` schreibt nur die DB (v2), sendet **kein** Signal – der Workflow
+bliebe stehen; ein späteres Signal würde `apply_answers` ggf. erneut ausführen.
+Live-Skript (A9) und README kennen `answers` noch nicht (A10 F1).
+
+## Offene Entscheidungen (nicht selbst treffen)
+
+| ID | Optionen | Frage |
+|---|---|---|
+| **A** | A1 / A2 / A3 | CLI↔Signal: **A1** `pmi answers` signalisiert zusätzlich den Workflow (Analogie `approve`→`authorized`); **A2** nur Signal-Pfad, CLI bleibt Kern-only; **A3** CLI signalisiert und Activity ist idempotent wenn v2 schon existiert |
+| **B** | B1 / B2 / B3 | `pmi start` bei offenen Fragen: **B1** nach Draft sofort `workflow_id`+`proposal_id` ausgeben (Request ggf. später / `pmi status` oder Follow-up); **B2** start blockiert mit Polling bis answers+Request; **B3** Timeout + eigener Wartebefehl |
+| **C** | C1 / C2 / C3 | Nachweis: **C1** `live_demo.sh` um answers-Zweig erweitern; **C2** separates `scripts/live_answers.sh`; **C3** nur FakeLLM-`make demo`, kein Live-Claude |
+| **D** | D1 / D2 / D3 | Fragen erzwingen: **D1** Task-Prompt (Live-LLM); **D2** FakeLLM-JSON mit `offene_fragen`; **D3** beides |
+| **E** | E1 / E2 / E3 | Tests: **E1** keine neuen pytest (nur Live-Bericht, wie A9); **E2** pytest für CLI-Signal + start/Draft-Ausgabe bei Fragen; **E3** nur pytest, Live optional |
+| **F** | F1 / F2 / F3 | Scope: **F1** nur Skript+README; **F2** F1 + CLI-Signal-Kopplung (A); **F3** F2 + optional `pmi eval` nach answers im Live |
+
+## Ist-Stand
+
+| Baustein | Stand |
+|---|---|
+| `apply_answers` / Proposal v2 / Diff / `human:` | grün (A10) |
+| Workflow-Signal `answers` vor `create_request` | grün (A10) |
+| CLI `pmi answers` | DB-only, kein Signal |
+| `pmi start` | wartet auf ExecutionRequest → hängt bei Fragen |
+| `scripts/live_demo.sh` / README | kein answers-Schritt |
+| Evaluator im Workflow | bewusst aus (A7 C1) |
+
+## Soll-Skizze (nach Freigabe A–F)
+
+```
+pmi start "<Aufgabe mit offenen Punkten>"
+  → Draft v1 (proposal_id sichtbar)
+  → [offene_fragen:] Mensch: pmi answers …  (+ Signal laut A)
+  → create_request (v2-Hash)
+  → approve → run → APPLIED
+Nachweis laut C/D; Bericht in tasks/todo.md
+```
+
+## Dateien (voraussichtlich, abhängig von A–F)
+
+```
+src/pmi/cli.py                 start-Ausgabe / answers→Signal
+scripts/live_demo.sh           oder scripts/live_answers.sh
+README.md                      pmi answers + Live-Hinweis
+tests/…                        nur wenn E2/E3
+tasks/todo.md                  Bericht
+```
+
+## Nicht in diesem Auftrag
+
+- UI / Frontend
+- LangGraph, Policy-Engine
+- Evaluator im Temporal-Workflow (A7 C1)
+- Abschnitt-12 `DIVERGENT`-Reconciliation
+- Terminaler Request-Status (L9)
+- Schemaänderung an `ProposalOutput`
+
+## Haltepunkte
+
+1. [ ] Plan + A–F freigeben → dann HP2.
+2. [ ] Rote Tests / Abnahme-Checkliste freigeben.
+3. [ ] Implementierung (+ Live falls C1/C2) grün; Testausgabe im Bericht.
+
