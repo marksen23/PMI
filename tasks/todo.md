@@ -633,18 +633,19 @@ PDF lokal unter `it-projekte/` (gitignored).
 - **F** Apostroph ’→' vor ZUORDNUNG.
 - Report-Pfade = Herkunft (`steckbrief.…`), nicht `fakten[…]`.
 
-## Dateien (Haltepunkt 2)
+## Dateien
 
 - `src/pmi/nd_bed_management_reference.py` – REFERENZLISTE / Sätze
-- `src/pmi/nd_bed_management_adapter.py` – Stub (`NotImplementedError`)
-- `src/pmi/eval_nd_bed_management.py` – Stub (`NotImplementedError`)
+- `src/pmi/nd_bed_management_adapter.py` – KEY-Zeilen → fakten/aussagen
+- `src/pmi/eval_nd_bed_management.py` – `evaluate() → NdBedEval`
 - `tests/test_eval_nd_bed_management.py` – T01–T24
 
 ## Haltepunkte
 
 1. [x] Plan inkl. A–F freigegeben.
-2. [ ] Rote Tests T01–T24 – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung Adapter + Evaluator – erst nach Freigabe von 2.
+2. [x] Rote Tests T01–T24 freigegeben.
+3. [x] Implementierung grün: 25 passed in `test_eval_nd_bed_management.py`
+   (gesamt mit Justitia/IHP: 65 passed).
 
 ## Nicht in diesem Auftrag
 
