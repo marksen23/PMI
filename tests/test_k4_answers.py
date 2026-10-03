@@ -454,7 +454,7 @@ async def test_workflow_waits_for_answers_signal(tmp_db_path, tmp_git_repo):
                 conn.close()
                 await handle.signal(InitiationWorkflow.authorized, auth.id)
                 result = await handle.result()
-                assert result.status in ("APPLIED", "AUTH_REJECTED") or result.status
+                assert result.status == "APPLIED"
 
 
 @pytest.mark.asyncio

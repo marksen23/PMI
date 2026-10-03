@@ -1146,3 +1146,60 @@ E1 Request-Status unverändert; F1 ohne UI/Live.
 - Abschnitt-12 `DIVERGENT`-Reconciliation
 - Terminaler Request-Status (E1 / L9)
 - Live-Skript-Erweiterung (F1)
+
+---
+
+# Auftrag 10 – Review-Nachzug (nicht abgenommen)
+
+Stand: 2026-10-03  
+Status: **Rote Tests vorgelegt, warte auf Freigabe**  
+decided_by: human:markus (2026-10-03 21:53 Europe/Berlin)  
+Branch-Stand Review: `cd88a5a`. PR #17 **nicht** abgenommen.
+
+## Befunde → Soll
+
+| # | Befund | Soll |
+|---|---|---|
+| 1 | Migration FK/Abbruch | atomar; ER-FK `(id,version)`; Tests ALTER mit/ohne Requests + Wiederanlauf |
+| 2 | answers-Wait ohne Timeout | Timeout → EXPIRED |
+| 3 | D1 nicht atomar; Signal nach Request still | BEGIN IMMEDIATE; Race-Test; Ablehnung+Audit |
+| 4 | CLI nur DB-Write | CLI signalisiert Workflow; kein v3 ohne Fragen |
+| 5 | Person-Präfixe | `agent:`/`human:`/Namensraum + whitespace ablehnen |
+| 6 | Activity nicht idempotent | Retry → kein 2. v2; Person = non-retryable |
+| 7 | alle offene_fragen geleert | nur beantwortete entfernen; v2 gegen ProposalOutput |
+
+Zusatz: immer-wahre Assertion in `test_k4_answers.py` → `assert result.status == "APPLIED"`.
+
+## Tests (rot)
+
+Datei: `tests/test_k4_review.py`
+
+| Test | # |
+|---|---|
+| `test_migrate_legacy_without_requests_allows_new_request` | 1 |
+| `test_migrate_legacy_with_requests_succeeds` | 1 |
+| `test_migrate_resume_after_aborted_partial` | 1 |
+| `test_answers_wait_timeout_expires` | 2 |
+| `test_d1_race_answers_vs_create_request` | 3 |
+| `test_signal_after_create_request_rejected_and_audited` | 3 |
+| `test_cli_answers_signals_waiting_workflow` | 4 |
+| `test_answers_on_empty_questions_does_not_create_v3` | 4 |
+| `test_apply_answers_rejects_namespace_person[...]` | 5 |
+| `test_apply_answers_activity_idempotent_retry` | 6 |
+| `test_apply_answers_invalid_person_non_retryable` | 6 |
+| `test_merge_keeps_unanswered_questions` | 7 |
+
+## Nachweis Rot (vor Freigabe)
+
+```
+tests/test_k4_review.py: 14 failed, 2 passed
+```
+
+Grün nur whitespace/leer (Person schon abgewiesen). Rest Assertion-Rot.
+**Keine Implementierung bis Freigabe.**
+
+## Haltepunkte
+
+1. [x] Review-Entscheidung human:markus.
+2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
+3. [ ] Implementierung bis grün.
