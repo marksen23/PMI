@@ -683,12 +683,9 @@ genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
 | `ClaudeLLMProvider` (max_tokens 16384, Workspace-Header) | vorhanden |
 | `GitProjectStoreAdapter._apply_steckbrief` | vorhanden (`steckbrief` im Payload) |
 | Prüfer Justitia / IHP / ND Bed | grün, ausserhalb Temporal |
-| Temporal `InitiationWorkflow` | läuft; Schritt 2 (`answers`) fehlt |
-| Activity `draft_proposal` | **Stub** (`action/path/scope`, `proposed_by=agent:stub`) |
-| Provider `content[0].text` | bricht bei ThinkingBlock |
-
-Lücke: Temporal-Draft erzeugt kein LLM-`ProposalOutput`. Der Store-Pfad für
-Steckbriefe existiert schon; der Workflow nutzt ihn nicht.
+| Temporal `InitiationWorkflow` | Draft→Approve→Steckbrief-Store (A2: kein answers) |
+| Activity `draft_proposal` | `run_agent` + `get_llm_provider()` → `ProposalOutput` |
+| Provider TextBlocks | B1 konkatenieren; Thinking ignoriert |
 
 ## Soll-Ablauf (freigegeben)
 
@@ -738,8 +735,17 @@ Rote Tests vorgelegt. Echte DB + git; Kern nicht mocken. Kein `answers_*` (A2).
 ## Haltepunkte
 
 1. [x] Plan inkl. A–F freigegeben (A2 B1 C1 D1 E1 F1).
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+2. [x] Rote Tests freigegeben.
+3. [x] Implementierung grün: `169 passed` (volle Suite, 2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+169 passed in 221.07s
+```
+
+Auftrag-7-Fokus zuvor: `tests/test_temporal_agent.py` + TextBlock + CLI = 10 passed;
+claude/agent/temporal = 44 passed.
 
 ## Nicht in diesem Auftrag (F1)
 
