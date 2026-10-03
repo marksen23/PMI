@@ -12,14 +12,18 @@ from pmi.eval_nd_bed_management import NdBedEval, evaluate
 from pmi.nd_bed_management_adapter import adapt
 
 
+# Schema-Pflichtfelder ohne KEY: Quellsatz, damit T18 keine unbelegten Aussagen erzeugt.
+_FILLER = "This was compounded by HHS staff turnover."
+
+
 def _proposal(
     *,
     budget_rahmen: str | None = None,
-    ausgangslage: str = "Kontext ohne Kennzahlenschlüssel.",
+    ausgangslage: str = _FILLER,
     erfolgskriterien: list[str] | None = None,
     annahmen: list[str] | None = None,
     meilensteine: list[dict] | None = None,
-    risiko_beschreibung: str = "Kein Kennzahlenschlüssel in dieser Beschreibung.",
+    risiko_beschreibung: str = _FILLER,
 ) -> ProposalOutput:
     return ProposalOutput.model_validate(
         {
@@ -32,8 +36,7 @@ def _proposal(
                 "stakeholder": [{"name": "DHHS", "rolle": "Agency"}],
                 "meilensteine": meilensteine or [],
                 "budget_rahmen": budget_rahmen,
-                "erfolgskriterien": erfolgskriterien
-                or ["Platzhalter ohne KEY-Zeile"],
+                "erfolgskriterien": erfolgskriterien or [_FILLER],
                 "annahmen": annahmen or [],
                 "offene_fragen": [],
             },
@@ -306,7 +309,8 @@ def test_t24_neg_aussage_in_risikoliste_unbelegt():
 
 
 def test_adapt_exposed_for_evaluator():
-    """Adapter ist der vorgesehene Einstieg; Stub wirft bis zur Implementierung."""
+    """Adapter liefert fakten mit Herkunftspfad."""
     out = _proposal(budget_rahmen=_lines(VENDOR="Bamboo Health"))
-    with pytest.raises(NotImplementedError):
-        adapt(out)
+    view = adapt(out)
+    assert any(f.key == "VENDOR" and f.herkunft == "steckbrief.budget_rahmen" for f in view.fakten)
+    assert view.konflikte == ()

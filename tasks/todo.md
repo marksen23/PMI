@@ -614,7 +614,7 @@ Stand: 2026-10-02. Erteilt, umgesetzt, grün.
 # Auftrag 6 – Prüfer ND HHS Bed Management Closeout
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe der Implementierung**
+Status: **Umgesetzt, grün (Haltepunkt 3)**
 
 Quelle: Closeout-Report 27.5166.02000, sha256
 `9cdb90d5cc07947a3f995bba39dc17a973b610823ce2d4780859b09046999747`.
