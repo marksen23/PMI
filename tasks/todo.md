@@ -1149,12 +1149,12 @@ E1 Request-Status unverändert; F1 ohne UI/Live.
 
 ---
 
-# Auftrag 10 – Review-Nachzug (nicht abgenommen)
+# Auftrag 10 – Review-Nachzug (Implementierung grün, Abnahme offen)
 
 Stand: 2026-10-03  
-Status: **Rote Tests vorgelegt, warte auf Freigabe**  
-decided_by: human:markus (2026-10-03 21:53 Europe/Berlin)  
-Branch-Stand Review: `cd88a5a`. PR #17 **nicht** abgenommen.
+Status: **Implementierung grün – warte auf Abnahme**  
+decided_by: human:markus (2026-10-03 21:57 Europe/Berlin)  
+Rote Tests abgenommen; Implementierung freigegeben. PR #17 bleibt Draft.
 
 ## Befunde → Soll
 
