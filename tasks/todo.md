@@ -1053,65 +1053,83 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 # Auftrag 10 – K4 / answers-Minimalpfad (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – Plan, warte auf Freigabe**  
+Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
 und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
 LangGraph, ohne Evaluator im Workflow.
 
-## Warum dieser Auftrag
+## Entscheidungen (freigegeben human:markus, 2026-10-03)
 
-A7 wählte A2: kein answers-Schritt; `offene_fragen` nur im Steckbrief. A8/A9
-ließen K4 bewusst zu. Der Initiation-Pfad kann offene Fragen stellen, aber
-noch nicht beantworten und versioniert fortschreiben.
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A3** | Temporal-Signal `answers` **und** CLI `pmi answers` |
+| **B** | **B1** | volle K4: neue Proposal-Version + neuer Request + Diff |
+| **C** | **C3** | Person Pflicht; Prefix `human:` serverseitig |
+| **D** | **D1** | answers nur vor `create_request` |
+| **E** | **E1** | Request-Status unverändert (L9) |
+| **F** | **F1** | nur Kern + Workflow + CLI + Tests |
 
 ## Ist-Stand
 
 | Baustein | Stand |
 |---|---|
-| `Proposal.version`, `insert_request(proposal_version=…)` | Schema vorhanden |
-| `draft_proposal` schreibt immer `proposal_version=1` | A7 |
-| Workflow: Draft → create_request → wait authorized (kein Schritt 2) | A7 A2 |
-| `offene_fragen` im `ProposalOutput` / Steckbrief-MD | vorhanden |
-| CLI: kein `pmi answers` | fehlt |
-| `ExecutionRequest.status` | nur OPEN\|EXPIRED (L9 / A9-Abnahme) |
+| `Proposal.version`, `insert_request(proposal_version=…)` | Schema vorhanden; PK nur `id` |
+| `draft_proposal` / create_request | immer version=1; kein answers |
+| Workflow | Draft → create_request → authorized (kein Schritt 2) |
+| CLI `pmi answers` / `pmi.answers` | fehlt |
+| `diff_json` | fehlt |
 
-## Soll-Ablauf (nach Freigabe, abhängig von A–E)
+## Soll-Ablauf (freigegeben)
 
 ```
-draft_proposal → Proposal v1 (kann offene_fragen haben)
-  → [wenn offene_fragen nicht leer:] warten auf answers-Signal / CLI
-  → neue Proposal-Version v2 (proposed_by human: oder mixed) + Diff
-  → create_request auf v2 (neuer Hash)
-  → approve / run / APPLIED wie bisher
+draft_proposal → Proposal v1
+  → [offene_fragen nicht leer:] wait answers-Signal / CLI → apply_answers
+       → Proposal v2 (human:<person>) + diff_json
+  → create_request auf neueste Version (neuer Hash)
+  → approve / run / APPLIED
 ```
 
-Leere `offene_fragen`: kein answers-Warten (wie Stub-Plan Auftrag 2).
+Leere `offene_fragen`: kein answers-Warten; create_request auf v1.
 
-## Offene Entscheidungen (bitte wählen)
+## Dateien (nach Freigabe HP2 → HP3)
 
-| ID | Optionen | Frage |
-|---|---|---|
-| **A** | **A1** Temporal-Signal `answers` + Activity Persistenz / **A2** nur CLI `pmi answers` (DB), Workflow pollt/Activity / **A3** Signal und CLI | Wie kommen Antworten in den Kern? |
-| **B** | **B1** volle K4: neue Proposal-Version + neuer Request + Diff / **B2** nur Audit der answers (kein neuer Request; wie alter Stub) / **B3** neue Version am selben Request (Hash-Update – bricht I1) | Wie streng K4? |
-| **C** | **C1** `proposed_by=human:<person>` / **C2** `mixed` / **C3** Person Pflicht in CLI, Prefix serverseitig | Wer schreibt die Folgeversion? |
-| **D** | **D1** answers nur vor `create_request` / **D2** auch nach Request OPEN vor approve (neuer Request ersetzt) / **D3** nach Auth verboten | Wann im Lebenszyklus? |
-| **E** | **E1** Request-Status unverändert (L9) / **E2** zusätzlich terminaler Status nach Apply (`FULFILLED` o.ä.) in A10 / **E3** terminaler Status eigener Auftrag 11 | Scope Request-Status? |
-| **F** | **F1** nur Kern+Workflow+CLI+Tests / **F2** + Live-Skript-Erweiterung / **F3** + UI | Lieferumfang? |
+```
+src/pmi/answers.py                 apply_answers (Kern)
+src/pmi/db.py                      PK (id,version), diff_json
+src/pmi/cli.py                     pmi answers
+src/pmi/temporal/workflow.py       Signal answers; Wait vor create_request
+src/pmi/temporal/activities.py     create_request liest neueste Version
+tests/test_k4_answers.py           neu (HP2)
+```
 
-Vorschlag (nicht entschieden): **A3, B1, C3, D1, E1, F1**.
+## Tests (Haltepunkt 2)
+
+| Test | Soll |
+|---|---|
+| `test_apply_answers_creates_proposal_version_2` | B1: id gleich, version=2 |
+| `test_apply_answers_proposed_by_human_prefix` | C3: `human:markus` |
+| `test_apply_answers_empty_person_rejected` | C3: ValueError, keine v2 |
+| `test_apply_answers_stores_diff` | B1: `diff_json` nicht leer |
+| `test_apply_answers_no_authorization` | Auth-Count 0 |
+| `test_create_request_after_answers_uses_v2_hash` | B1/D1: proposal_version=2, Hash≠v1 |
+| `test_answers_rejected_after_create_request` | D1 |
+| `test_cli_answers_command` | A3 CLI |
+| `test_workflow_waits_for_answers_signal` | A3/D1 Signal vor Request |
+| `test_workflow_skips_answers_when_no_questions` | leere Fragen → v1 Request |
 
 ## Haltepunkte
 
-1. [ ] Plan + A–F freigeben (human:markus).
-2. [ ] Rote Tests vorlegen; warte auf Freigabe.
+1. [x] Plan + A–F freigegeben (human:markus) → A3 B1 C3 D1 E1 F1.
+2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
-## Nicht in diesem Auftrag (Default)
+## Nicht in diesem Auftrag
 
-- UI / Frontend (bis F3)
+- UI / Frontend
 - LangGraph, Policy-Engine
-- Schemaänderung an `ProposalOutput`-Feldern (nur Versionierung/Diff)
+- Schemaänderung an `ProposalOutput`-Feldern (nur Versionierung/Diff am Proposal)
 - Evaluator im Temporal-Workflow (A7 C1)
 - Abschnitt-12 `DIVERGENT`-Reconciliation
-- LLM erzeugt Authorization oder Status (unverändert verboten)
+- Terminaler Request-Status (E1 / L9)
+- Live-Skript-Erweiterung (F1)
