@@ -847,7 +847,7 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (Merge PR #12 → `9947cb6`).  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
@@ -937,3 +937,71 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 - Schemaänderung an `ProposalOutput`
 - Live-LLM-Lauf (Tests: FakeLLM)
 - `docker compose up` in CI (nur Datei/Struktur)
+
+---
+
+# Auftrag 9 – Live-E2E über CLI (Plan)
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – Plan, warte auf Freigabe**  
+Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
+Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
+(Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
+ohne K4/answers, ohne Schemaänderung.
+
+## Warum dieser Auftrag
+
+Auftrag 8 schliesst den CLI-Pfad mit FakeLLM/`make demo`. Der Produktpfad
+braucht noch den Live-Durchstich (Key nur Umgebung; Fake ausgeschaltet).
+K4/answers und UI bleiben bewusst eigene Aufträge (siehe Entscheidungen).
+
+## Ist-Stand
+
+| Baustein | Stand |
+|---|---|
+| CLI Bedienpfad init/start/show/approve/run/status/eval/worker | grün (A8) |
+| Temporal + docker-compose | Datei vorhanden; Live-up nicht in Suite |
+| `ClaudeLLMProvider` + Workspace-Header | vorhanden; Live-Läufe früher für Eval |
+| FakeLLM-Härtung D1 | `PMI_ALLOW_FAKE_LLM` nötig ausserhalb pytest |
+| Evaluators Justitia/IHP/ND | CLI `pmi eval`, nicht im Workflow (A7 C1) |
+
+## Soll-Ablauf (nach Freigabe)
+
+```
+docker compose up Temporal
+pmi init + pmi worker          # ohne PMI_ALLOW_FAKE_LLM / ohne Fake-JSON
+pmi start "<Live-Aufgabe>"     # Claude draft_proposal
+pmi show / pmi eval …          # optional vor Approve
+pmi approve <id> <person>
+pmi run <id>
+pmi status → APPLIED
+Steckbrief unter projekte/<id>/ im git-Store
+Bericht: IDs, Modell, stop_reason, keine Auth aus LLM
+```
+
+## Offene Entscheidungen (bitte wählen)
+
+| ID | Optionen | Frage |
+|---|---|---|
+| **A** | **A1** Skript `scripts/live_demo.sh` (+ README) / **A2** nur manueller Lauf + Bericht in `tasks/todo.md` / **A3** beides | Wie wird der Live-Pfad festgehalten? |
+| **B** | **B1** echter `docker compose up` Temporal Pflicht für Abnahme / **B2** Worker gegen schon laufenden Host reicht | Temporal-Nachweis? |
+| **C** | **C1** `pmi eval` vor approve im Live-Lauf Pflicht (ein Prüfer) / **C2** eval optional / **C3** kein eval in A9 | Evaluatoren im Live-Durchstich? |
+| **D** | **D1** K4/answers bleibt zu (eigener Auftrag) / **D2** answers-Minimalpfad in A9 | Scope answers? |
+| **E** | **E1** keine neuen pytest für Live (wie A7 E1) / **E2** Smoke-Test der nur skippt ohne Key/Host | Automatisierte Tests? |
+
+Vorschlag (nicht entschieden): **A1, B1, C2, D1, E1**.
+
+## Haltepunkte
+
+1. [ ] Plan + A–E freigeben (human:markus).
+2. [ ] Rote Tests / Checkliste vorlegen (nur wenn E2; sonst Abnahme-Checkliste).
+3. [ ] Live-Lauf + Bericht; Suite unverändert grün.
+
+## Nicht in diesem Auftrag (Default, bis D2)
+
+- UI / Frontend / Deploy-Hosting
+- LangGraph, Policy-Engine
+- K4 / answers (D1)
+- Schemaänderung `ProposalOutput`
+- Evaluator im Temporal-Workflow (bleibt C1 aus A7)
+- Abschnitt-12-Entscheidungen (`DIVERGENT` etc.)
