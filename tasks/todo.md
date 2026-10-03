@@ -659,7 +659,7 @@ PDF lokal unter `it-projekte/` (gitignored).
 # Auftrag 7 – Agentenarchitektur schliessen (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
+Status: **Umgesetzt, grün (Haltepunkt 3)**  
 Ziel: KI-Plattform für Projektmanagement – Agentenpfad von Aufgabe bis
 genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
 
