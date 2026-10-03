@@ -943,17 +943,21 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 # Auftrag 9 – Live-E2E über CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – Plan, warte auf Freigabe**  
+Status: **Haltepunkt 2 – Abnahme-Checkliste vorgelegt, warte auf Freigabe**  
 Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
 Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
 (Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
 ohne K4/answers, ohne Schemaänderung.
 
-## Warum dieser Auftrag
+## Entscheidungen (freigegeben human:markus, 2026-10-03)
 
-Auftrag 8 schliesst den CLI-Pfad mit FakeLLM/`make demo`. Der Produktpfad
-braucht noch den Live-Durchstich (Key nur Umgebung; Fake ausgeschaltet).
-K4/answers und UI bleiben bewusst eigene Aufträge (siehe Entscheidungen).
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | `scripts/live_demo.sh` + README-Abschnitt |
+| **B** | **B1** | echter `docker compose up` Temporal Pflicht für Abnahme |
+| **C** | **C2** | `pmi eval` im Live-Lauf optional |
+| **D** | **D1** | K4/answers bleibt zu (eigener Auftrag) |
+| **E** | **E1** | keine neuen pytest für Live (Key/Host ausserhalb Suite) |
 
 ## Ist-Stand
 
@@ -965,39 +969,51 @@ K4/answers und UI bleiben bewusst eigene Aufträge (siehe Entscheidungen).
 | FakeLLM-Härtung D1 | `PMI_ALLOW_FAKE_LLM` nötig ausserhalb pytest |
 | Evaluators Justitia/IHP/ND | CLI `pmi eval`, nicht im Workflow (A7 C1) |
 
-## Soll-Ablauf (nach Freigabe)
+## Soll-Ablauf (nach Freigabe HP3)
 
 ```
-docker compose up Temporal
-pmi init + pmi worker          # ohne PMI_ALLOW_FAKE_LLM / ohne Fake-JSON
-pmi start "<Live-Aufgabe>"     # Claude draft_proposal
-pmi show / pmi eval …          # optional vor Approve
+docker compose up Temporal                 # B1
+pmi init + pmi worker                      # ohne FakeLLM
+pmi start "<Live-Aufgabe>"                 # Claude draft_proposal
+pmi show  [optional: pmi eval …]           # C2
 pmi approve <id> <person>
 pmi run <id>
-pmi status → APPLIED
-Steckbrief unter projekte/<id>/ im git-Store
-Bericht: IDs, Modell, stop_reason, keine Auth aus LLM
+pmi status → APPLIED (+ Steckbrief im Store)
+Bericht in tasks/todo.md
 ```
 
-## Offene Entscheidungen (bitte wählen)
+## Dateien (nach Freigabe HP2 → HP3)
 
-| ID | Optionen | Frage |
+```
+scripts/live_demo.sh     A1: Live-Durchstich (compose + worker + CLI)
+README.md                Abschnitt Live-E2E / Voraussetzungen
+tasks/todo.md            Bericht nach Lauf
+```
+
+Keine neuen Tests (E1). Suite unverändert; Fake-Demo (`make demo`) bleibt.
+
+## Abnahme-Checkliste (Haltepunkt 2)
+
+| # | Soll | Nachweis |
 |---|---|---|
-| **A** | **A1** Skript `scripts/live_demo.sh` (+ README) / **A2** nur manueller Lauf + Bericht in `tasks/todo.md` / **A3** beides | Wie wird der Live-Pfad festgehalten? |
-| **B** | **B1** echter `docker compose up` Temporal Pflicht für Abnahme / **B2** Worker gegen schon laufenden Host reicht | Temporal-Nachweis? |
-| **C** | **C1** `pmi eval` vor approve im Live-Lauf Pflicht (ein Prüfer) / **C2** eval optional / **C3** kein eval in A9 | Evaluatoren im Live-Durchstich? |
-| **D** | **D1** K4/answers bleibt zu (eigener Auftrag) / **D2** answers-Minimalpfad in A9 | Scope answers? |
-| **E** | **E1** keine neuen pytest für Live (wie A7 E1) / **E2** Smoke-Test der nur skippt ohne Key/Host | Automatisierte Tests? |
-
-Vorschlag (nicht entschieden): **A1, B1, C2, D1, E1**.
+| L1 | `docker compose up` startet Temporal auf `localhost:7233` | compose ps / Port |
+| L2 | Worker ohne `PMI_ALLOW_FAKE_LLM` und ohne `PMI_FAKE_LLM_JSON` | ENV im Skript/Lauf |
+| L3 | `ANTHROPIC_API_KEY` gesetzt; optional `ANTHROPIC_WORKSPACE_ID` | nur Umgebung |
+| L4 | `pmi start` → `request_id` / `workflow_id` / `proposal_id` | stdout |
+| L5 | Proposal `proposed_by=agent:llm`, gültiges `ProposalOutput` | DB / `pmi show` |
+| L6 | Keine Authorization vor `pmi approve` | Auth-Count 0 |
+| L7 | Nach approve+run: Request/Execution → APPLIED | `pmi status` |
+| L8 | Steckbrief unter `projekte/<proposal_id>/` im git-Store | Dateien |
+| L9 | Bericht: Modell, IDs, kein Key/Prompt im Repo | `tasks/todo.md` |
+| L10 | `pytest` volle Suite weiterhin grün | Testausgabe |
 
 ## Haltepunkte
 
-1. [ ] Plan + A–E freigeben (human:markus).
-2. [ ] Rote Tests / Checkliste vorlegen (nur wenn E2; sonst Abnahme-Checkliste).
-3. [ ] Live-Lauf + Bericht; Suite unverändert grün.
+1. [x] Plan + A–E freigegeben (human:markus) → A1 B1 C2 D1 E1.
+2. [ ] Abnahme-Checkliste L1–L10 – **warte auf Freigabe**, bevor Skript/Live-Lauf.
+3. [ ] Implementierung (`live_demo.sh` + README) + Live-Lauf + Bericht; Suite grün.
 
-## Nicht in diesem Auftrag (Default, bis D2)
+## Nicht in diesem Auftrag
 
 - UI / Frontend / Deploy-Hosting
 - LangGraph, Policy-Engine
@@ -1005,3 +1021,4 @@ Vorschlag (nicht entschieden): **A1, B1, C2, D1, E1**.
 - Schemaänderung `ProposalOutput`
 - Evaluator im Temporal-Workflow (bleibt C1 aus A7)
 - Abschnitt-12-Entscheidungen (`DIVERGENT` etc.)
+- Neue pytest-Live-Tests (E1)
