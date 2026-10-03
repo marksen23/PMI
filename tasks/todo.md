@@ -614,54 +614,41 @@ Stand: 2026-10-02. Erteilt, umgesetzt, grün.
 # Auftrag 6 – Prüfer ND HHS Bed Management Closeout
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – Plan, warte auf Freigabe (OFFEN A–F)**
+Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe der Implementierung**
 
-Quelle und Raster liegen als Grok-Lieferung vor (Closeout-Report
-27.5166.02000). PDF verifiziert: HTTP 200, 147991 Bytes,
-sha256 `9cdb90d5cc07947a3f995bba39dc17a973b610823ce2d4780859b09046999747`
-(identisch mit dem Auftrag). Lokal unter
-`it-projekte/nd_bed_management/` (gitignored). `pdftotext` fehlt in der
-Umgebung vorerst; Auszug im Auftrag gilt bis zur Reproduktion.
+Quelle: Closeout-Report 27.5166.02000, sha256
+`9cdb90d5cc07947a3f995bba39dc17a973b610823ce2d4780859b09046999747`.
+PDF lokal unter `it-projekte/` (gitignored).
 
-## Was der Auftrag ist
+## Entscheidungen A–F (human:markus, 2026-10-03)
 
-Deterministischer Evaluator gegen die REFERENZLISTE des ND-Closeout-Reports.
-Kein Netz, kein Modell, Schema unverändert (solange OFFEN A ohne Schemaänderung
-gelöst wird). Analog Justitia/IHP: Hart / Unbelegt / Schwach.
+- **A** Adapter ohne Schemaänderung: KEY-Zeilen in
+  `budget_rahmen`, `meilensteine`, `erfolgskriterien`, `annahmen`,
+  `ausgangslage`, `risikoliste[i].beschreibung`; Konflikt = HART-Fail;
+  Zahlen ohne KEY nie zu fakten.
+- **B** fehlender Key = nicht bewertet (T18 Pass).
+- **C** DE-Format wenn eindeutig (`^\d{1,3}(\.\d{3})*,\d{2}$`), sonst SCHWACH.
+- **D** nur Quellwerte, keine Nachrechnung als HART.
+- **E** L6/L8 nur Muster; Raster gilt für ND.
+- **F** Apostroph ’→' vor ZUORDNUNG.
+- Report-Pfade = Herkunft (`steckbrief.…`), nicht `fakten[…]`.
 
-## Schema-Lage (Fakt, keine Entscheidung)
+## Dateien (Haltepunkt 2)
 
-`ProposalOutput` hat nur `steckbrief` + `risikoliste`. Felder
-`fakten[]` / `aussagen[]` existieren nicht. Ohne Freigabe von OFFEN A
-starten weder Tests noch Implementierung.
-
-## OFFEN – Freigabe nötig
-
-| ID | Frage | Optionen (kurz) | Hinweis |
-|---|---|---|---|
-| **A** | Mapping ProposalOutput ↔ Kennzahlen | Schema-Pfade mappen / Adapter ohne Schemaänderung / FREIGABE neue Felder | Empfohlen: Adapter; konkrete Zielpfade müssen festliegen |
-| **B** | Fehlender Kennzahlenschlüssel | nicht bewertet / Pflichtmenge FAIL / alle Pflicht | T18 hängt davon ab |
-| **C** | DE-Zahlenformat | nur US / DE wenn eindeutig / DE = SCHWACH | |
-| **D** | Varianz nachrechnen | nur Quellwerte / Hinweis / HART | Empfohlen: nur Quellwerte |
-| **E** | Bezug L6/L8 | nachreichen+abgleichen / Raster als konform | L6=Justitia, L8=IHP; Muster analog, kein Wortlaut-Zwang |
-| **F** | Apostroph ’→' in ZUORDNUNG | nein / ja | |
-
-## Dateien (nach Freigabe A–F und Haltepunkt 2)
-
-`src/pmi/nd_bed_management_reference.py`,  
-`src/pmi/eval_nd_bed_management.py`,  
-`tests/test_eval_nd_bed_management.py`.  
-Kein zweites Spec-Dokument. PDF bleibt ausserhalb des Repos.
+- `src/pmi/nd_bed_management_reference.py` – REFERENZLISTE / Sätze
+- `src/pmi/nd_bed_management_adapter.py` – Stub (`NotImplementedError`)
+- `src/pmi/eval_nd_bed_management.py` – Stub (`NotImplementedError`)
+- `tests/test_eval_nd_bed_management.py` – T01–T24
 
 ## Haltepunkte
 
-1. **Dieser Plan** – warte auf Freigabe inkl. A–F (Mapping A ist Blocker).
-2. Tests (rot) aus der Grok-TEST-Tabelle, angepasst an das freigegebene Mapping.
-3. Implementierung – erst nach Freigabe der Tests.
+1. [x] Plan inkl. A–F freigegeben.
+2. [ ] Rote Tests T01–T24 – vorgelegt, **warte auf Freigabe**.
+3. [ ] Implementierung Adapter + Evaluator – erst nach Freigabe von 2.
 
 ## Nicht in diesem Auftrag
 
 - Live-Lauf / Modellaufruf
-- Schemaänderung ohne ausdrückliche Freigabe
+- Schemaänderung an ProposalOutput
 - Authorization/Status/decided_by
-- Nachberechnung von Varianzen als Referenz (OFFEN D)
+- Varianz-Nachrechnung als HART
