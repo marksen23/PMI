@@ -757,3 +757,106 @@ claude/agent/temporal = 44 passed.
 - answers / K4 (A2)
 - Live-Lauf gegen PDF (nur wenn Mark extra freigibt)
 - Reconciliation-Strategie `DIVERGENT` (Abschnitt 12, PROVISIONAL `none`)
+
+---
+
+# Auftrag 7b – Atomarität draft_proposal (Nachzug PR #11)
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – warte auf Freigabe**  
+Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).  
+Freigabe durch Markus für den Review-Befund liegt vor; Entscheidungen A–D unten
+bleiben OFFEN bis zur Plan-Freigabe.
+
+## Problem
+
+Seit `822fa1c` schreibt `activity_draft_proposal` nicht mehr atomar:
+
+1. `run_agent` → `insert_proposal` (eigener `commit`)
+2. `run_agent` → `append_audit(AGENT_PROPOSAL_GENERATED)` (eigener `commit`)
+3. Activity → `append_audit(DRAFT_PROPOSAL)` (eigener `commit`)
+
+Dedup liest nur Schritt 3. Absturz dazwischen → Retry ohne `DRAFT_PROPOSAL` →
+zweiter LLM-Aufruf, zweites Proposal. Das verletzt Auftrag 2
+(„Retry erzeugt keine zweite Zeile“).  
+`test_draft_dedup_returns_same_proposal` prüft nur Retry nach vollem Erfolg.
+
+## Ziel
+
+Retry von `draft_proposal` nach Abbruch an jeder Stelle zwischen den Writes
+erzeugt kein zweites Proposal und keinen zweiten LLM-Aufruf. Writes wieder
+atomar oder gleichwertig idempotent. `ProposalOutput`-Schema unverändert;
+kein Auth/Status durch LLM; `decided_by` nur `human:`.
+
+## Entscheidungen – OFFEN (Markus)
+
+Nicht selbst treffen.
+
+- **A – Atomarität / Idempotenz**  
+  A1: LLM-Aufruf und Validierung **ausserhalb** der DB-TX; danach **eine**
+  Transaktion: Proposal + `AGENT_PROPOSAL_GENERATED` + `DRAFT_PROPOSAL`
+  (`run_agent` Persistenz aufspalten oder TX-fähige Schreib-API).  
+  A2: `run_agent` erhält den Temporal-`dedup_key` und schreibt alle drei
+  Zeilen selbst in einer TX; Activity nur noch Aufruf + Return.  
+  A3: Vor dem LLM ein `DRAFT_PROPOSAL`-Platzhalter (oder Lookup-Schlüssel);
+  Retry erkennt Teilstand und setzt fort, ohne zweiten LLM-Call.  
+  A4: andere Variante (Markus nennt sie).
+
+- **B – Crash-Nachweis (Haltepunkt 2)**  
+  B1: gezielter Abbruch nach Proposal-Insert / nach AGENT-Audit / vor
+  DRAFT-Audit (Fault-Hook oder Prozesskill); Retry → eine Proposal-Zeile,
+  ein LLM-Call (Zähler am Fake-Provider), Dedup hält.  
+  B2: nur DB-Zustand nach simuliertem Halbfertig-Stand + erneutem Activity-Aufruf
+  (ohne Kill), gleiche Assertions.  
+  B3: B1 und B2.
+
+- **C – Nebenbei A2: `offene_fragen` in `steckbrief.md`**  
+  C1: ja, ein Test (FakeLLM mit nicht-leerer `offene_fragen` → Apply →
+  Abschnitt in `steckbrief.md`).  
+  C2: nicht in diesem Auftrag.
+
+- **D – Nebenbei E1-Härtung** (nur Optionen; nicht selbst entscheiden)  
+  D1: leerer String `PMI_FAKE_LLM_JSON=""` gilt als unset (kein Fake);
+  Fake ausserhalb pytest nur mit explizitem `PMI_ALLOW_FAKE_LLM=1`.  
+  D2: Fake nur wenn `PYTEST_CURRENT_TEST` gesetzt; sonst immer Claude.  
+  D3: nicht in diesem Auftrag.  
+  D4: andere (Markus).
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/agent.py                 Persistenz/TX je nach A
+src/pmi/db.py                    ggf. insert ohne Auto-Commit / TX-Helfer
+src/pmi/temporal/activities.py   atomarer/idempotenter draft_proposal
+tests/test_temporal_agent.py     Crash-/Halbstand-Retry; optional C1
+src/pmi/temporal/… oder config   nur wenn D ≠ D3
+```
+
+Kein neues Spezifikationsdokument. Kurzer `docs/decisions.md`-Eintrag nur bei
+Abweichung von Auftrag-2-Zusage-Formulierung.
+
+## Tests (Haltepunkt 2, nach Freigabe von 1)
+
+Echter Kern, echte SQLite; nur LLM-Provider gepatcht/Fake. Kein Mock von
+Adapter/Zustandsmaschine/Approval.
+
+| Test | Soll |
+|---|---|
+| `test_draft_retry_after_partial_writes_no_second_proposal` | Halbfertig (Proposal und/oder AGENT-Audit ohne DRAFT) → Retry → `COUNT(Proposal)=1`, ein Provider-Aufruf, Return gleiche `proposal_id` |
+| `test_draft_retry_after_agent_audit_before_draft_audit` | Abbruch genau zwischen Schritt 2 und 3 → gleiches |
+| `test_draft_dedup_after_full_success` | bestehend, bleibt grün |
+| `test_offene_fragen_in_steckbrief_md` | nur bei C1 |
+| E1-Härtungs-Tests | nur bei D1/D2/D4 |
+
+## Haltepunkte
+
+1. [ ] Dieser Plan inkl. A–D – **warte auf Freigabe**.
+2. [ ] Rote Tests – vorlegen, auf Freigabe warten.
+3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+
+## Nicht in diesem Auftrag
+
+- UI / Deploy / CLI-Bedienpfad (Auftrag 8)
+- answers / K4
+- Schemaänderung `ProposalOutput`
+- Evaluator im Workflow
