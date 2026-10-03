@@ -943,7 +943,7 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 # Auftrag 9 – Live-E2E über CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03).  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (Merge PR #15 → `6579693`).
 Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
 Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
 (Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
@@ -1034,7 +1034,7 @@ Hinweis: `ExecutionRequest.status` blieb OPEN; `Execution.status=APPLIED`
 
 Abnahme-Klärung (human:markus, 2026-10-03): OPEN bei Execution=APPLIED ist
 bewusst – Request nur OPEN|EXPIRED; Erfolg auf Execution + `consumed_by_execution_id`.
-Kein K5; kein Fix in diesem PR. Terminaler Request-Status ggf. späterer Auftrag.
+Kein K5; kein Fix in A9. Terminaler Request-Status ggf. späterer Auftrag.
 
 Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM).
 
@@ -1047,3 +1047,71 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 - Evaluator im Temporal-Workflow (bleibt C1 aus A7)
 - Abschnitt-12-Entscheidungen (`DIVERGENT` etc.)
 - Neue pytest-Live-Tests (E1)
+
+---
+
+# Auftrag 10 – K4 / answers-Minimalpfad (Plan)
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – Plan, warte auf Freigabe**  
+Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
+Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
+und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
+LangGraph, ohne Evaluator im Workflow.
+
+## Warum dieser Auftrag
+
+A7 wählte A2: kein answers-Schritt; `offene_fragen` nur im Steckbrief. A8/A9
+ließen K4 bewusst zu. Der Initiation-Pfad kann offene Fragen stellen, aber
+noch nicht beantworten und versioniert fortschreiben.
+
+## Ist-Stand
+
+| Baustein | Stand |
+|---|---|
+| `Proposal.version`, `insert_request(proposal_version=…)` | Schema vorhanden |
+| `draft_proposal` schreibt immer `proposal_version=1` | A7 |
+| Workflow: Draft → create_request → wait authorized (kein Schritt 2) | A7 A2 |
+| `offene_fragen` im `ProposalOutput` / Steckbrief-MD | vorhanden |
+| CLI: kein `pmi answers` | fehlt |
+| `ExecutionRequest.status` | nur OPEN\|EXPIRED (L9 / A9-Abnahme) |
+
+## Soll-Ablauf (nach Freigabe, abhängig von A–E)
+
+```
+draft_proposal → Proposal v1 (kann offene_fragen haben)
+  → [wenn offene_fragen nicht leer:] warten auf answers-Signal / CLI
+  → neue Proposal-Version v2 (proposed_by human: oder mixed) + Diff
+  → create_request auf v2 (neuer Hash)
+  → approve / run / APPLIED wie bisher
+```
+
+Leere `offene_fragen`: kein answers-Warten (wie Stub-Plan Auftrag 2).
+
+## Offene Entscheidungen (bitte wählen)
+
+| ID | Optionen | Frage |
+|---|---|---|
+| **A** | **A1** Temporal-Signal `answers` + Activity Persistenz / **A2** nur CLI `pmi answers` (DB), Workflow pollt/Activity / **A3** Signal und CLI | Wie kommen Antworten in den Kern? |
+| **B** | **B1** volle K4: neue Proposal-Version + neuer Request + Diff / **B2** nur Audit der answers (kein neuer Request; wie alter Stub) / **B3** neue Version am selben Request (Hash-Update – bricht I1) | Wie streng K4? |
+| **C** | **C1** `proposed_by=human:<person>` / **C2** `mixed` / **C3** Person Pflicht in CLI, Prefix serverseitig | Wer schreibt die Folgeversion? |
+| **D** | **D1** answers nur vor `create_request` / **D2** auch nach Request OPEN vor approve (neuer Request ersetzt) / **D3** nach Auth verboten | Wann im Lebenszyklus? |
+| **E** | **E1** Request-Status unverändert (L9) / **E2** zusätzlich terminaler Status nach Apply (`FULFILLED` o.ä.) in A10 / **E3** terminaler Status eigener Auftrag 11 | Scope Request-Status? |
+| **F** | **F1** nur Kern+Workflow+CLI+Tests / **F2** + Live-Skript-Erweiterung / **F3** + UI | Lieferumfang? |
+
+Vorschlag (nicht entschieden): **A3, B1, C3, D1, E1, F1**.
+
+## Haltepunkte
+
+1. [ ] Plan + A–F freigeben (human:markus).
+2. [ ] Rote Tests vorlegen; warte auf Freigabe.
+3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+
+## Nicht in diesem Auftrag (Default)
+
+- UI / Frontend (bis F3)
+- LangGraph, Policy-Engine
+- Schemaänderung an `ProposalOutput`-Feldern (nur Versionierung/Diff)
+- Evaluator im Temporal-Workflow (A7 C1)
+- Abschnitt-12 `DIVERGENT`-Reconciliation
+- LLM erzeugt Authorization oder Status (unverändert verboten)
