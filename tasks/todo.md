@@ -1054,6 +1054,7 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 
 Stand: 2026-10-03  
 Status: **Umgesetzt, grün (Haltepunkt 3)**  
+(HP2 abgenommen human:markus, 2026-10-03; HP3 danach umgesetzt.)  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
 und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
@@ -1070,15 +1071,15 @@ LangGraph, ohne Evaluator im Workflow.
 | **E** | **E1** | Request-Status unverändert (L9) |
 | **F** | **F1** | nur Kern + Workflow + CLI + Tests |
 
-## Ist-Stand
+## Ist-Stand (nach HP3)
 
 | Baustein | Stand |
 |---|---|
-| `Proposal.version`, `insert_request(proposal_version=…)` | Schema vorhanden; PK nur `id` |
-| `draft_proposal` / create_request | immer version=1; kein answers |
-| Workflow | Draft → create_request → authorized (kein Schritt 2) |
-| CLI `pmi answers` / `pmi.answers` | fehlt |
-| `diff_json` | fehlt |
+| `Proposal.version`, `insert_request(proposal_version=…)` | PK `(id,version)`; `diff_json` |
+| `draft_proposal` / create_request | create_request auf neueste Version |
+| Workflow | Wait auf answers-Signal wenn `offene_fragen` |
+| CLI `pmi answers` / `pmi.answers` | vorhanden |
+| `apply_answers` | `src/pmi/answers.py` |
 
 ## Soll-Ablauf (freigegeben)
 
@@ -1121,7 +1122,8 @@ tests/test_k4_answers.py           neu (HP2)
 ## Haltepunkte
 
 1. [x] Plan + A–F freigegeben (human:markus) → A3 B1 C3 D1 E1 F1.
-2. [x] Rote Tests freigegeben.
+2. [x] Rote Tests abgenommen (human:markus, 2026-10-03).
+   Vor HP3: `pytest tests/test_k4_answers.py` 9 failed, 1 passed (7.07s).
 3. [x] Implementierung grün: `tests/test_k4_answers.py` 10 passed;
    Regression (Kern/CLI/Eval/Temporal-Subset) 119 passed.
 
