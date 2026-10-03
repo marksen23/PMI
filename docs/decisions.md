@@ -21,6 +21,8 @@ Auftrag 2 nutzte Stub `touch_file`. Auftrag 7: `draft_proposal` → `run_agent` 
 
 ## D4 – draft_proposal Atomarität + Staging (2026-10-03)
 
+decided_by: human:markus (2026-10-03)
+
 Auftrag 7b A1: LLM ausserhalb; eine TX für Proposal+AGENT+DRAFT. Zusätzlich
 `DRAFT_STAGING` (committed vor der TX), damit Retry nach Kill/Rollback keinen
 zweiten LLM-Aufruf braucht (B1/B3). Leeres `PMI_FAKE_LLM_JSON` = unset; Fake
