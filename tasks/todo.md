@@ -608,3 +608,60 @@ Stand: 2026-10-02. Erteilt, umgesetzt, grün.
 - [x] PR #5 gemergt (L8 auf main)
 - [x] Tests inkl. Live-Budgettext und Unbelegt
 - [x] Implementierung grün (`tests/test_eval_ihp.py` + Justitia unverändert)
+
+---
+
+# Auftrag 6 – Prüfer ND HHS Bed Management Closeout
+
+Stand: 2026-10-03  
+Status: **Haltepunkt 1 – Plan, warte auf Freigabe (OFFEN A–F)**
+
+Quelle und Raster liegen als Grok-Lieferung vor (Closeout-Report
+27.5166.02000). PDF verifiziert: HTTP 200, 147991 Bytes,
+sha256 `9cdb90d5cc07947a3f995bba39dc17a973b610823ce2d4780859b09046999747`
+(identisch mit dem Auftrag). Lokal unter
+`it-projekte/nd_bed_management/` (gitignored). `pdftotext` fehlt in der
+Umgebung vorerst; Auszug im Auftrag gilt bis zur Reproduktion.
+
+## Was der Auftrag ist
+
+Deterministischer Evaluator gegen die REFERENZLISTE des ND-Closeout-Reports.
+Kein Netz, kein Modell, Schema unverändert (solange OFFEN A ohne Schemaänderung
+gelöst wird). Analog Justitia/IHP: Hart / Unbelegt / Schwach.
+
+## Schema-Lage (Fakt, keine Entscheidung)
+
+`ProposalOutput` hat nur `steckbrief` + `risikoliste`. Felder
+`fakten[]` / `aussagen[]` existieren nicht. Ohne Freigabe von OFFEN A
+starten weder Tests noch Implementierung.
+
+## OFFEN – Freigabe nötig
+
+| ID | Frage | Optionen (kurz) | Hinweis |
+|---|---|---|---|
+| **A** | Mapping ProposalOutput ↔ Kennzahlen | Schema-Pfade mappen / Adapter ohne Schemaänderung / FREIGABE neue Felder | Empfohlen: Adapter; konkrete Zielpfade müssen festliegen |
+| **B** | Fehlender Kennzahlenschlüssel | nicht bewertet / Pflichtmenge FAIL / alle Pflicht | T18 hängt davon ab |
+| **C** | DE-Zahlenformat | nur US / DE wenn eindeutig / DE = SCHWACH | |
+| **D** | Varianz nachrechnen | nur Quellwerte / Hinweis / HART | Empfohlen: nur Quellwerte |
+| **E** | Bezug L6/L8 | nachreichen+abgleichen / Raster als konform | L6=Justitia, L8=IHP; Muster analog, kein Wortlaut-Zwang |
+| **F** | Apostroph ’→' in ZUORDNUNG | nein / ja | |
+
+## Dateien (nach Freigabe A–F und Haltepunkt 2)
+
+`src/pmi/nd_bed_management_reference.py`,  
+`src/pmi/eval_nd_bed_management.py`,  
+`tests/test_eval_nd_bed_management.py`.  
+Kein zweites Spec-Dokument. PDF bleibt ausserhalb des Repos.
+
+## Haltepunkte
+
+1. **Dieser Plan** – warte auf Freigabe inkl. A–F (Mapping A ist Blocker).
+2. Tests (rot) aus der Grok-TEST-Tabelle, angepasst an das freigegebene Mapping.
+3. Implementierung – erst nach Freigabe der Tests.
+
+## Nicht in diesem Auftrag
+
+- Live-Lauf / Modellaufruf
+- Schemaänderung ohne ausdrückliche Freigabe
+- Authorization/Status/decided_by
+- Nachberechnung von Varianzen als Referenz (OFFEN D)
