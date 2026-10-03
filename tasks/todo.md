@@ -847,7 +847,7 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 3 – Implementierung (Freigabe HP2 erteilt)**  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
@@ -917,7 +917,18 @@ tests/test_cli_bedienpfad.py   neu
 
 1. [x] A–F und G1–G5 freigegeben (human:markus).
 2. [x] Rote Tests – Freigabe erteilt (human:markus).
-3. [ ] Implementierung bis grün; Testausgabe im Bericht.
+3. [x] Implementierung grün: `188 passed` (volle Suite, 2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_cli_bedienpfad.py: 12 passed in 0.59s
+188 passed in 221.86s (0:03:41)
+```
+
+A1: `pmi start` pollt bis ExecutionRequest; B1 show JSON; C1 status OPEN+IDs;
+D1/G2 ENV Host/Queue; E2 eval ohne Auth; G1 README; G3 docker-compose Temporal;
+G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 
 ## Nicht in diesem Auftrag
 
