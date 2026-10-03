@@ -33,3 +33,7 @@ ANTHROPIC_WORKSPACE_ID: str = _os.environ.get("ANTHROPIC_WORKSPACE_ID", "")  # P
 # Temporal draft_proposal Timeouts (Auftrag 7 / D1).
 DRAFT_PROPOSAL_START_TO_CLOSE_SECONDS: int = 120  # PROVISIONAL – LLM-Netz
 DRAFT_PROPOSAL_MAXIMUM_ATTEMPTS: int = 3  # PROVISIONAL – LLM-Netz
+
+# Temporal Host / Queue (Auftrag 8 / D1). Runtime-Code liest bevorzugt ENV.
+PMI_TEMPORAL_HOST: str = "localhost:7233"  # PROVISIONAL
+PMI_TASK_QUEUE: str = "pmi-initiation"  # PROVISIONAL

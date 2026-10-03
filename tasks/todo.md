@@ -763,8 +763,8 @@ claude/agent/temporal = 44 passed.
 # Auftrag 7b – Atomarität draft_proposal (Nachzug PR #11)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)**  
-Branch: `cursor/auftrag7-agent-arch-plan-d7ae` (Folge zu gemergtem PR #11).
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03 17:01).  
+Branch: gemergt als `27614f3` auf main.
 
 ## Entscheidungen A–D (freigegeben human:markus, 2026-10-03 16:08 Europe/Berlin)
 
@@ -841,3 +841,99 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 - answers / K4
 - Schemaänderung `ProposalOutput`
 - Evaluator im Workflow
+
+---
+
+# Auftrag 8 – Bedienpfad CLI (Plan)
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – warte auf Abnahme.  
+Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
+Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
+über CLI + Worker + Temporal.
+
+## Entscheidungen (human:markus)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | `pmi start` blockiert bis `ExecutionRequest`, Exit 0 mit IDs |
+| **B** | **B1** | `pmi show` → Proposal JSON |
+| **C** | **C1** | `status`: Request immer; Execution falls vorhanden; OPEN + IDs |
+| **D** | **D1** | `PMI_TEMPORAL_HOST` / `PMI_TASK_QUEUE` |
+| **E** | **E2** | `pmi eval <justitia\|ihp\|nd_bed> <request_id>` |
+| **F** | **F3** | = G1+G2+G3+G4+G5 (2026-10-03 17:31) |
+
+### F3 / G (freigegeben)
+
+- **G1** README Bedienung Start→Show→Approve→Run→Status→Eval  
+- **G2** `pmi worker` liest Host/Queue aus ENV (D1)  
+- **G3** `docker-compose` Temporal (+ optional Worker); README „Lokal starten“  
+- **G4** `pmi init` legt Kontroll-DB-Schema an `PMI_DB_PATH` an  
+- **G5** `make demo` oder `scripts/demo.sh` FakeLLM-Durchstich  
+
+G3-Tests: nur Struktur (Datei + Service-Namen), kein `docker compose up` in der Suite.
+
+## Soll-Bedienpfad
+
+```
+1. Temporal + Worker (D1/G2/G3)
+2. pmi init                  → G4
+3. pmi start "<task>"        → A1
+4. pmi show <request_id>     → B1
+5. pmi approve / run / status→ C1
+6. pmi eval …                → E2
+7. make demo / scripts/demo  → G5
+```
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/cli.py                 start, show, status, init, eval, worker
+src/pmi/temporal/worker.py     Host/Queue aus ENV
+config.py                      TEMPORAL_HOST / TASK_QUEUE PROVISIONAL Defaults
+README.md                      Bedienung + Lokal starten (G1/G3)
+docker-compose.yml             Temporal (+ optional Worker) (G3)
+Makefile oder scripts/demo.sh  FakeLLM-Durchstich (G5)
+tests/test_cli_bedienpfad.py   neu
+```
+
+## Tests (Haltepunkt 2)
+
+| Test | Soll |
+|---|---|
+| `test_start_creates_workflow_and_request` | A1: Request + workflow_id + Proposal agent:llm |
+| `test_start_prints_ids` | stdout: request_id, workflow_id, proposal_id |
+| `test_start_does_not_create_authorization` | Auth-Count 0 |
+| `test_show_prints_proposal_json` | B1: gültiges Proposal JSON |
+| `test_status_open_request` | C1: Request-Status OPEN + IDs, ohne Execution |
+| `test_worker_uses_env_host_and_queue` | G2/D1 |
+| `test_eval_justitia_no_authorization` | E2: Report, Auth unverändert 0 |
+| `test_init_creates_schema` | G4 |
+| `test_readme_documents_bedienpfad` | G1 |
+| `test_docker_compose_declares_temporal` | G3 Struktur |
+| `test_demo_entry_exists` | G5 Makefile-Ziel oder scripts/demo.sh |
+
+## Haltepunkte
+
+1. [x] A–F und G1–G5 freigegeben (human:markus).
+2. [x] Rote Tests – Freigabe erteilt (human:markus).
+3. [x] Implementierung grün: `188 passed` (volle Suite, 2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_cli_bedienpfad.py: 12 passed in 0.59s
+188 passed in 221.86s (0:03:41)
+```
+
+A1: `pmi start` pollt bis ExecutionRequest; B1 show JSON; C1 status OPEN+IDs;
+D1/G2 ENV Host/Queue; E2 eval ohne Auth; G1 README; G3 docker-compose Temporal;
+G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
+
+## Nicht in diesem Auftrag
+
+- UI / Frontend
+- LangGraph, Policy-Engine, K4/answers
+- Schemaänderung an `ProposalOutput`
+- Live-LLM-Lauf (Tests: FakeLLM)
+- `docker compose up` in CI (nur Datei/Struktur)
