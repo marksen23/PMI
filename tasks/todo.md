@@ -847,114 +847,72 @@ Staging `DRAFT_STAGING` vor TX (B1/B3, ein LLM-Aufruf). D1 Fake-Härtung.
 # Auftrag 8 – Bedienpfad CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – warte auf Freigabe**  
+Status: **Haltepunkt 1 – F3-Umfang OFFEN, Tests gestoppt**  
 Voraussetzung: Auftrag 7 + 7b gemergt (`27614f3`).  
 Ziel: Bedienbarer End-to-End-Pfad ohne UI – von Aufgabe bis APPLIED
 über CLI + Worker + Temporal.
 
-## Ist-Stand (Inventur)
+## Entscheidungen A–F (human:markus, 2026-10-03 17:28 Europe/Berlin)
 
-| Baustein | Stand |
-|---|---|
-| Agent + Temporal Draft→Steckbrief-Store | grün (Auftrag 7/7b) |
-| `pmi approve` / `pmi run` / `pmi status` | vorhanden |
-| Workflow **starten** (`start_workflow`) | **fehlt in CLI** |
-| Worker | hardcoded `localhost:7233`, Queue `pmi-initiation` |
-| CLI Task-Queue | nicht gesetzt; Tests nutzen `pmi-test` |
-| Proposal/Request einsehen vor Approve | **fehlt** |
-| `status` bei wartendem Request (noch keine Execution) | unbrauchbar |
-| Prüfer Justitia/IHP/ND | Module grün, kein CLI-Befehl |
-| README Bedienungsanleitung | leer (`# PMI`) |
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A1** | `pmi start` blockiert bis `ExecutionRequest` in DB, Exit 0 mit IDs |
+| **B** | **B1** | `pmi show <request_id>` → Proposal JSON (stdout) |
+| **C** | **C1** | `status`: Request immer; Execution falls vorhanden; OPEN + IDs |
+| **D** | **D1** | `PMI_TEMPORAL_HOST` / `PMI_TASK_QUEUE` (Defaults localhost:7233 / pmi-initiation) |
+| **E** | **E2** | `pmi eval <justitia\|ihp\|nd_bed> <request_id>` – nur Report |
+| **F** | **F3** | erweitert – **im Plan nicht konkret definiert** → siehe OFFEN G unten |
 
-Ohne `pmi start` ist die Plattform nicht bedienbar: niemand startet den Workflow.
+## F3 – OFFEN (konkretisieren vor Haltepunkt 2)
 
-## Soll-Bedienpfad (nach Freigabe)
+Im Plan steht nur `F3: erweitert um … (Mark)`. Kein fester Umfang.
+Rote Tests und Implementierung starten **erst nach Freigabe von G**.
+
+Basis ohne F3-Zusatz wäre F1: CLI-Bedienpfad + kurze README
+(`start` / `show` / `approve` / `run` / `status` / `eval` laut A–E).
+
+Bitte G wählen (Mehrfachauswahl möglich, z. B. `G1+G2+G4`):
+
+- **G1** – F1-Kern + README (Bedienung Start→Show→Approve→Run→Status→Eval).  
+  Kein UI, kein Deploy.
+- **G2** – `pmi worker`-Einstieg / dokumentierter Worker-Start über ENV (D1);
+  kein Docker.
+- **G3** – `docker-compose` für Temporal (+ optional Worker) und kurzer
+  README-Abschnitt „Lokal starten“.
+- **G4** – CLI `pmi init` / DB-Schema-Anlage am angegebenen `PMI_DB_PATH`
+  (nur Kontroll-DB, kein Status durch LLM).
+- **G5** – Durchstich-Skript oder Make-Ziel `make demo` (FakeLLM, ohne Live-Key):
+  start→show→approve→run→status einmalig.
+- **G6** – andere Erweiterung (Mark nennt sie).
+- **G0** – F3 = inhaltlich F1 (nur README + Bedienpfad inkl. eval aus E2);
+  kein Deploy/Docker/UI.
+
+## Soll-Bedienpfad (A–E, ohne unklaren F3-Zusatz)
 
 ```
-1. Temporal + Worker laufen (Queue aus config/ENV)
-2. pmi start "<task>"     → startet InitiationWorkflow
-                          → wartet bis create_request (oder Timeout)
-                          → druckt workflow_id, request_id, proposal_id
-3. pmi show <request_id>  → Steckbrief/Risiken aus Proposal (nur Lesen)
+1. Temporal + Worker laufen (Queue aus config/ENV, D1)
+2. pmi start "<task>"     → A1: wartet bis create_request, druckt IDs
+3. pmi show <request_id>  → B1: Proposal JSON
 4. pmi approve <request_id> <person>
-5. pmi run <request_id>   → Signal authorized (bestehend)
-6. pmi status <request_id>→ Request-Status + ggf. Execution-Status
+5. pmi run <request_id>   → Signal authorized
+6. pmi status <request_id>→ C1: Request + ggf. Execution
+7. pmi eval <which> <request_id> → E2: Report only
 ```
 
 Invarianten: CLI erzeugt keine Authorization ausser über `approve`;
-`decided_by` nur `human:`; kein LLM setzt Status.
-
-## Entscheidungen – OFFEN (Mark)
-
-- **A – start-Verhalten**  
-  A1: blockiert bis `ExecutionRequest` in DB (Poll), dann Exit 0 mit IDs.  
-  A2: startet fire-and-forget, druckt nur `workflow_id`.  
-  A3: A1 + optionales `--wait-approval-timeout` (nur Start-Wartezeit).
-
-- **B – show**  
-  B1: `pmi show <request_id>` zeigt Proposal JSON (stdout).  
-  B2: Markdown-ähnlich (Titel, Ziel, Risiken kurz).  
-  B3: show nicht in diesem Auftrag.
-
-- **C – status erweitern**  
-  C1: Request-Status immer; Execution nur wenn vorhanden; bei OPEN
-  zusätzlich `proposal_id` / `workflow_id`.  
-  C2: unverändert lassen.
-
-- **D – Worker / Queue (PROVISIONAL vorschlagen)**  
-  D1: `PMI_TEMPORAL_HOST` (Default `localhost:7233`),
-  `PMI_TASK_QUEUE` (Default `pmi-initiation`); Worker + CLI + start nutzen dieselbe Queue.  
-  D2: andere Defaults (Mark nennt sie).
-
-- **E – eval CLI**  
-  E1: nicht in diesem Auftrag.  
-  E2: `pmi eval <justitia|ihp|nd_bed> <request_id>` – nur Report, nie Auth/Status.
-
-- **F – Scope / README**  
-  F1: nur Bedienpfad CLI + kurze README-Bedienung (Start/Approve/Run/Status); kein UI, kein Deploy.  
-  F2: F1 ohne README.  
-  F3: erweitert um … (Mark).
-
-## Dateien (nach Freigabe der Tests)
-
-```
-src/pmi/cli.py                 start, show?, status erweitert
-src/pmi/temporal/worker.py     Host/Queue aus ENV
-config.py                      PMI_TASK_QUEUE Defaults als PROVISIONAL nur wenn nötig
-README.md                      Bedienpfad (wenn F1)
-tests/test_cli_start.py        neu
-tests/test_cli_run.py          Queue-Konsistenz falls nötig
-```
-
-Kein neues Spezifikationsdokument. Kurzer `docs/decisions.md`-Eintrag nur bei Abweichung.
-
-## Tests (Haltepunkt 2, nach Freigabe von 1)
-
-Rote Tests vor Implementierung. Temporal in Tests: `WorkflowEnvironment` oder
-gemockter Client wie in `test_cli_run.py` – Kern-DB echt.
-
-| Test | Soll |
-|---|---|
-| `test_start_creates_workflow_and_request` | nach start: Request in DB, `workflow_id` gesetzt, Proposal `agent:llm` |
-| `test_start_prints_ids` | stdout enthält request_id und workflow_id |
-| `test_start_does_not_create_authorization` | Authorization-Count 0 |
-| `test_show_*` | nur wenn B1/B2 |
-| `test_status_open_request` | OPEN ohne Execution: Request-Status sichtbar (C1) |
-| `test_worker_reads_host_and_queue` | Worker verbindet mit ENV-Werten (D) |
-| `test_eval_*` | nur wenn E2 |
-
-Bestehende Suite bleibt grün.
+`decided_by` nur `human:`; kein LLM setzt Status; `ProposalOutput` unverändert;
+kein Kern-Mock in Invarianten-/Absturztests.
 
 ## Haltepunkte
 
-1. [ ] Dieser Plan inkl. A–F – **warte auf Freigabe**.
-2. [ ] Rote Tests – vorlegen, auf Freigabe warten.
+1. [x] A–F freigegeben (A1 B1 C1 D1 E2 F3); **F3-Detail = OFFEN G – warte**.
+2. [ ] Rote Tests – erst nach Freigabe G.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
-## Nicht in diesem Auftrag (ausser F3)
+## Nicht in diesem Auftrag (bis G etwas anderes freigibt)
 
 - UI / Frontend
-- Deploy / Hosting / Docker-Compose (außer wenn Mark F3 setzt)
 - LangGraph, Policy-Engine, K4/answers
 - Schemaänderung an `ProposalOutput`
-- Live-LLM-Lauf (Tests: FakeLLM wie Auftrag 7)
+- Live-LLM-Lauf (Tests: FakeLLM)
+- Deploy/Docker nur wenn G3 (oder Mark in G6)
