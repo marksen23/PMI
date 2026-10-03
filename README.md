@@ -4,7 +4,7 @@ KI-Projektmanagement-Plattform (Phase 1): Kontroll-DB (SQLite) + git-CAS + Tempo
 
 ## Lokal starten
 
-1. Temporal (Port 7233):
+1. Temporal (Port 7233; Compose nutzt `network_mode: host`):
 
 ```bash
 docker compose up -d postgresql temporal temporal-ui

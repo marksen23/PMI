@@ -30,7 +30,7 @@ git -C "$REPO_PATH" commit --allow-empty -qm "init"
 
 export PMI_DB_PATH="$DB_PATH"
 export PMI_REPO_PATH="$REPO_PATH"
-export PMI_TEMPORAL_HOST="${PMI_TEMPORAL_HOST:-localhost:7233}"
+export PMI_TEMPORAL_HOST="${PMI_TEMPORAL_HOST:-127.0.0.1:7233}"
 export PMI_TASK_QUEUE="${PMI_TASK_QUEUE:-pmi-initiation}"
 export PMI_START_WAIT_SECONDS="${PMI_START_WAIT_SECONDS:-180}"
 export PYTHONPATH="${ROOT}:${ROOT}/src${PYTHONPATH:+:$PYTHONPATH}"
@@ -56,20 +56,36 @@ echo "Live-Verzeichnis: $LIVE_DIR"
 echo "Temporal: $PMI_TEMPORAL_HOST  Queue: $PMI_TASK_QUEUE"
 echo "FakeLLM: aus (ALLOW unset, JSON unset)"
 
-# L1: Temporal via docker compose
+# L1: Temporal via docker compose (idempotent, wenn schon läuft)
 docker compose -f "$ROOT/docker-compose.yml" up -d postgresql temporal
 COMPOSE_STARTED=1
 
-echo "Warte auf Temporal :7233 …"
-for _ in $(seq 1 90); do
-  if (echo >/dev/tcp/127.0.0.1/7233) >/dev/null 2>&1; then
+echo "Warte auf Temporal-Client :7233 …"
+READY=0
+for _ in $(seq 1 120); do
+  if python3 - <<'PY'
+import asyncio
+import os
+import sys
+
+async def main() -> None:
+    from temporalio.client import Client
+
+    host = os.environ.get("PMI_TEMPORAL_HOST", "localhost:7233")
+    await asyncio.wait_for(Client.connect(host), timeout=3)
+
+asyncio.run(main())
+PY
+  then
+    READY=1
     break
   fi
   sleep 2
 done
-if ! (echo >/dev/tcp/127.0.0.1/7233) >/dev/null 2>&1; then
-  echo "live_demo: Temporal nicht erreichbar auf localhost:7233" >&2
+if [[ "$READY" -ne 1 ]]; then
+  echo "live_demo: Temporal-Client nicht bereit auf $PMI_TEMPORAL_HOST" >&2
   docker compose -f "$ROOT/docker-compose.yml" ps >&2 || true
+  docker compose -f "$ROOT/docker-compose.yml" logs --tail=80 temporal >&2 || true
   exit 1
 fi
 
