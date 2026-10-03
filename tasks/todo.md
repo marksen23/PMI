@@ -608,3 +608,47 @@ Stand: 2026-10-02. Erteilt, umgesetzt, grün.
 - [x] PR #5 gemergt (L8 auf main)
 - [x] Tests inkl. Live-Budgettext und Unbelegt
 - [x] Implementierung grün (`tests/test_eval_ihp.py` + Justitia unverändert)
+
+---
+
+# Auftrag 6 – Prüfer ND HHS Bed Management Closeout
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)**
+
+Quelle: Closeout-Report 27.5166.02000, sha256
+`9cdb90d5cc07947a3f995bba39dc17a973b610823ce2d4780859b09046999747`.
+PDF lokal unter `it-projekte/` (gitignored).
+
+## Entscheidungen A–F (human:markus, 2026-10-03)
+
+- **A** Adapter ohne Schemaänderung: KEY-Zeilen in
+  `budget_rahmen`, `meilensteine`, `erfolgskriterien`, `annahmen`,
+  `ausgangslage`, `risikoliste[i].beschreibung`; Konflikt = HART-Fail;
+  Zahlen ohne KEY nie zu fakten.
+- **B** fehlender Key = nicht bewertet (T18 Pass).
+- **C** DE-Format wenn eindeutig (`^\d{1,3}(\.\d{3})*,\d{2}$`), sonst SCHWACH.
+- **D** nur Quellwerte, keine Nachrechnung als HART.
+- **E** L6/L8 nur Muster; Raster gilt für ND.
+- **F** Apostroph ’→' vor ZUORDNUNG.
+- Report-Pfade = Herkunft (`steckbrief.…`), nicht `fakten[…]`.
+
+## Dateien (Haltepunkt 2)
+
+- `src/pmi/nd_bed_management_reference.py` – REFERENZLISTE / Sätze
+- `src/pmi/nd_bed_management_adapter.py` – Stub (`NotImplementedError`)
+- `src/pmi/eval_nd_bed_management.py` – Stub (`NotImplementedError`)
+- `tests/test_eval_nd_bed_management.py` – T01–T24
+
+## Haltepunkte
+
+1. [x] Plan inkl. A–F freigegeben.
+2. [ ] Rote Tests T01–T24 – vorgelegt, **warte auf Freigabe**.
+3. [ ] Implementierung Adapter + Evaluator – erst nach Freigabe von 2.
+
+## Nicht in diesem Auftrag
+
+- Live-Lauf / Modellaufruf
+- Schemaänderung an ProposalOutput
+- Authorization/Status/decided_by
+- Varianz-Nachrechnung als HART

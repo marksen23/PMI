@@ -9,3 +9,4 @@ build/
 .hypothesis/
 *.sqlite
 *.db
+it-projekte/
