@@ -29,3 +29,7 @@ ANTHROPIC_API_KEY: str = _os.environ.get("ANTHROPIC_API_KEY", "")
 # Workspace-ID für Request-Routing innerhalb des Anthropic-Kontos.
 # Optional – leer = Default-Workspace. Kommt ausschließlich aus der Umgebung.
 ANTHROPIC_WORKSPACE_ID: str = _os.environ.get("ANTHROPIC_WORKSPACE_ID", "")  # PROVISIONAL
+
+# Temporal draft_proposal Timeouts (Auftrag 7 / D1).
+DRAFT_PROPOSAL_START_TO_CLOSE_SECONDS: int = 120  # PROVISIONAL – LLM-Netz
+DRAFT_PROPOSAL_MAXIMUM_ATTEMPTS: int = 3  # PROVISIONAL – LLM-Netz

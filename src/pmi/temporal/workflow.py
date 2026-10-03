@@ -9,6 +9,8 @@ from temporalio.common import RetryPolicy
 from temporalio.exceptions import ActivityError
 
 with workflow.unsafe.imports_passed_through():
+    import config as _config
+
     from pmi.temporal.activities import (
         ApplyWriteInput,
         BeginExecutionInput,
@@ -30,6 +32,9 @@ with workflow.unsafe.imports_passed_through():
         activity_verify_write,
     )
 
+    _DRAFT_START_TO_CLOSE = _config.DRAFT_PROPOSAL_START_TO_CLOSE_SECONDS
+    _DRAFT_MAX_ATTEMPTS = _config.DRAFT_PROPOSAL_MAXIMUM_ATTEMPTS
+
 
 @dataclass
 class WorkflowInput:
@@ -45,6 +50,11 @@ class WorkflowResult:
 
 
 _RETRY = RetryPolicy(maximum_attempts=5, initial_interval=timedelta(seconds=1), backoff_coefficient=2.0)
+_DRAFT_RETRY = RetryPolicy(
+    maximum_attempts=_DRAFT_MAX_ATTEMPTS,
+    initial_interval=timedelta(seconds=1),
+    backoff_coefficient=2.0,
+)
 
 
 @workflow.defn
@@ -69,8 +79,8 @@ class InitiationWorkflow:
                 step=1,
                 workflow_id=wf_id,
             ),
-            start_to_close_timeout=timedelta(seconds=30),
-            retry_policy=_RETRY,
+            start_to_close_timeout=timedelta(seconds=_DRAFT_START_TO_CLOSE),
+            retry_policy=_DRAFT_RETRY,
         )
 
         # Schritt 3: create_request (liest git HEAD, schreibt ExecutionRequest)

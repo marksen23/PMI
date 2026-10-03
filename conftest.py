@@ -1,4 +1,5 @@
 """Root-level conftest: setzt PMI_AUTHORIZATION_HMAC_SECRET und PYTHONPATH vor dem Import von config."""
+import json
 import os
 from pathlib import Path
 
@@ -6,6 +7,41 @@ _repo_root = str(Path(__file__).parent)
 _src_dir = str(Path(__file__).parent / "src")
 
 os.environ.setdefault("PMI_AUTHORIZATION_HMAC_SECRET", "test-secret-for-pytest")
+
+# E1: Temporal-/Activity-Tests nutzen FakeLLMProvider statt Netzaufruf.
+os.environ.setdefault(
+    "PMI_FAKE_LLM_JSON",
+    json.dumps(
+        {
+            "steckbrief": {
+                "titel": "Test-Projekt",
+                "ausgangslage": "Ist-Zustand",
+                "ziel": "Soll-Zustand",
+                "umfang": ["Modul A"],
+                "nicht_umfang": [],
+                "stakeholder": [{"name": "Max", "rolle": "PL"}],
+                "meilensteine": [],
+                "budget_rahmen": None,
+                "erfolgskriterien": ["Kriterium 1"],
+                "annahmen": [],
+                "offene_fragen": [],
+            },
+            "risikoliste": {
+                "risiken": [
+                    {
+                        "beschreibung": "Tech-Risiko",
+                        "ursache": "Komplexität",
+                        "auswirkung": "Verzögerung",
+                        "wahrscheinlichkeit": "mittel",
+                        "schadensausmass": "mittel",
+                        "massnahme": "Prototyp",
+                        "verantwortlich_vorschlag": "Tech Lead",
+                    }
+                ]
+            },
+        }
+    ),
+)
 
 # Stellt sicher dass Worker-Subprozesse sowohl 'config' als auch 'pmi' importieren können.
 _existing = os.environ.get("PYTHONPATH", "")

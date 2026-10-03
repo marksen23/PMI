@@ -12,3 +12,9 @@ aber verbraucht. Auftrag 1b.
 `pmi run` signalisiert den laufenden Workflow. Die ID steht in `ExecutionRequest.workflow_id`
 und wird im selben INSERT wie der Request geschrieben. Ein gesetzter Wert wird nicht
 überschrieben. Die Skizze kennt die Spalte nicht.
+
+## D3 – Temporal draft_proposal ruft run_agent (2026-10-03)
+
+Auftrag 2 nutzte Stub `touch_file`. Auftrag 7: `draft_proposal` → `run_agent` →
+`ProposalOutput`; Apply über `_apply_steckbrief`. Tests steuern den Provider über
+`PMI_FAKE_LLM_JSON` / `get_llm_provider()`. Kein answers-Schritt (A2).
