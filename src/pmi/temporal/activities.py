@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 import json
-import uuid as _uuid
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
 import temporalio.activity as _activity
 
+from pmi.agent import FakeLLMProvider, LLMProvider, run_agent
 from pmi.db import (
     append_audit,
     get_db,
@@ -29,8 +30,14 @@ def _dedup(workflow_id: str, step: int, event_type: str) -> str:
     return f"{workflow_id}:{step}:{event_type}"
 
 
-def _stub_payload() -> dict:
-    return {"action": "touch_file", "path": "temporal_output.txt", "scope": "local"}
+def get_llm_provider() -> LLMProvider:
+    """E1: FakeLLM wenn PMI_FAKE_LLM_JSON gesetzt, sonst ClaudeLLMProvider."""
+    fake_json = os.environ.get("PMI_FAKE_LLM_JSON", "")
+    if fake_json:
+        return FakeLLMProvider(fake_json)
+    from pmi.claude_provider import ClaudeLLMProvider
+
+    return ClaudeLLMProvider()
 
 
 # ── Input / Result-Dataclasses ────────────────────────────────────────────────
@@ -135,29 +142,29 @@ async def activity_draft_proposal(args: DraftProposalInput) -> DraftProposalResu
     ).fetchone()
     if existing:
         data = json.loads(existing["payload_json"])
+        proposal_id = data["proposal_id"]
+        row = conn.execute(
+            "SELECT payload_json FROM Proposal WHERE id=?", (proposal_id,)
+        ).fetchone()
         conn.close()
-        return DraftProposalResult(proposal_id=data["proposal_id"], payload=_stub_payload())
-    payload = _stub_payload()
-    proposal_id = str(_uuid.uuid4())
-    audit_id = str(_uuid.uuid4())
-    audit_payload = json.dumps({"proposal_id": proposal_id, "task": args.task})
-    # Beide Writes atomar – kein Fenster zwischen Proposal und AuditEvent.
-    conn.execute("BEGIN")
-    try:
-        conn.execute(
-            "INSERT INTO Proposal (id, proposed_by, payload_json) VALUES (?, ?, ?)",
-            (proposal_id, "agent:stub", json.dumps(payload)),
+        if row is None:
+            raise RuntimeError(f"DRAFT_PROPOSAL Dedup ohne Proposal: {proposal_id}")
+        return DraftProposalResult(
+            proposal_id=proposal_id,
+            payload=json.loads(row["payload_json"]),
         )
-        conn.execute(
-            "INSERT INTO AuditEvent "
-            "(id, dedup_key, event_type, execution_id, seq, payload_json) "
-            "VALUES (?, ?, 'DRAFT_PROPOSAL', NULL, 0, ?)",
-            (audit_id, dedup_key, audit_payload),
-        )
-        conn.execute("COMMIT")
-    except Exception:
-        conn.execute("ROLLBACK")
-        raise
+
+    provider = get_llm_provider()
+    proposal_id, output = run_agent(task=args.task, conn=conn, provider=provider)
+    payload = output.model_dump(mode="json")
+    append_audit(
+        conn,
+        dedup_key,
+        "DRAFT_PROPOSAL",
+        None,
+        0,
+        {"proposal_id": proposal_id, "task": args.task},
+    )
     conn.close()
     return DraftProposalResult(proposal_id=proposal_id, payload=payload)
 

@@ -256,6 +256,35 @@ def test_workspace_header_absent_when_not_set(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 8. ThinkingBlock: alle TextBlocks konkatenieren (Auftrag 7 / B1)
+# ---------------------------------------------------------------------------
+
+def test_provider_concatenates_text_blocks():
+    """Thinking/andere Blöcke ignorieren; alle TextBlocks aneinanderhängen."""
+    from types import SimpleNamespace
+
+    from pmi.claude_provider import ClaudeLLMProvider
+
+    thinking = SimpleNamespace(type="thinking", thinking="interne Überlegung")
+    text_a = SimpleNamespace(type="text", text='{"steckbrief":')
+    text_b = SimpleNamespace(type="text", text=' {"titel": "X"}}')
+
+    message = MagicMock()
+    message.content = [thinking, text_a, text_b]
+    message.model = "claude-sonnet-5-5"
+
+    client = MagicMock()
+    client.messages.create.return_value = message
+
+    with patch("pmi.claude_provider.anthropic.Anthropic", return_value=client):
+        provider = ClaudeLLMProvider(api_key="test-key")
+        result = provider.generate("prompt", provider.model, provider.version)
+
+    assert result == '{"steckbrief": {"titel": "X"}}'
+    assert "interne Überlegung" not in result
+
+
+# ---------------------------------------------------------------------------
 # 9. Optionaler Live-Test (nur wenn ANTHROPIC_API_KEY gesetzt)
 # ---------------------------------------------------------------------------
 

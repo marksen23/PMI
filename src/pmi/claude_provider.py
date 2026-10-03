@@ -45,4 +45,20 @@ class ClaudeLLMProvider(LLMProvider):
             messages=[{"role": "user", "content": prompt}],
         )
         self._resolved_version = response.model
-        return response.content[0].text  # type: ignore[union-attr]
+        return _concat_text_blocks(response.content)
+
+
+def _concat_text_blocks(content: list[object]) -> str:
+    """B1: alle TextBlocks konkatenieren; Thinking und andere Typen ignorieren."""
+    parts: list[str] = []
+    for block in content:
+        block_type = getattr(block, "type", None)
+        # Nur echte Typ-Strings filtern (Mocks ohne type="text" bleiben erlaubt).
+        if isinstance(block_type, str) and block_type != "text":
+            continue
+        text = getattr(block, "text", None)
+        if isinstance(text, str):
+            parts.append(text)
+    if not parts:
+        raise ValueError("LLM-Antwort enthält keinen TextBlock")
+    return "".join(parts)

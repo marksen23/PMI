@@ -633,18 +633,19 @@ PDF lokal unter `it-projekte/` (gitignored).
 - **F** Apostroph ’→' vor ZUORDNUNG.
 - Report-Pfade = Herkunft (`steckbrief.…`), nicht `fakten[…]`.
 
-## Dateien (Haltepunkt 2)
+## Dateien
 
 - `src/pmi/nd_bed_management_reference.py` – REFERENZLISTE / Sätze
-- `src/pmi/nd_bed_management_adapter.py` – Stub (`NotImplementedError`)
-- `src/pmi/eval_nd_bed_management.py` – Stub (`NotImplementedError`)
+- `src/pmi/nd_bed_management_adapter.py` – KEY-Zeilen → fakten/aussagen
+- `src/pmi/eval_nd_bed_management.py` – `evaluate() → NdBedEval`
 - `tests/test_eval_nd_bed_management.py` – T01–T24
 
 ## Haltepunkte
 
 1. [x] Plan inkl. A–F freigegeben.
-2. [ ] Rote Tests T01–T24 – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung Adapter + Evaluator – erst nach Freigabe von 2.
+2. [x] Rote Tests T01–T24 freigegeben.
+3. [x] Implementierung grün: 25 passed in `test_eval_nd_bed_management.py`
+   (gesamt mit Justitia/IHP: 65 passed).
 
 ## Nicht in diesem Auftrag
 
@@ -652,3 +653,107 @@ PDF lokal unter `it-projekte/` (gitignored).
 - Schemaänderung an ProposalOutput
 - Authorization/Status/decided_by
 - Varianz-Nachrechnung als HART
+
+---
+
+# Auftrag 7 – Agentenarchitektur schliessen (Plan)
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)**  
+Ziel: KI-Plattform für Projektmanagement – Agentenpfad von Aufgabe bis
+genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
+
+## Entscheidungen A–F (freigegeben 2026-10-03)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A2** | Schritt 2 weglassen; `offene_fragen` nur im Steckbrief; K4 bleibt zu |
+| **B** | **B1** | alle TextBlocks konkatenieren; Thinking/andere ignorieren |
+| **C** | **C1** | kein Evaluator im Workflow |
+| **D** | **D1** | `start_to_close=120s`, `maximum_attempts=3`; PROVISIONAL in config.py |
+| **E** | **E1** | Temporal-Tests mit `FakeLLMProvider`; Live-Key ausserhalb |
+| **F** | **F1** | nur Agentenarchitektur; kein UI/Deploy/LangGraph |
+
+## Ist-Stand (Inventur)
+
+| Baustein | Stand |
+|---|---|
+| Sicherheitskern (DB, Approval, Zustandsmaschine, CAS-Git) | grün |
+| `run_agent` + `ProposalOutput` + `FakeLLMProvider` | vorhanden |
+| `ClaudeLLMProvider` (max_tokens 16384, Workspace-Header) | vorhanden |
+| `GitProjectStoreAdapter._apply_steckbrief` | vorhanden (`steckbrief` im Payload) |
+| Prüfer Justitia / IHP / ND Bed | grün, ausserhalb Temporal |
+| Temporal `InitiationWorkflow` | Draft→Approve→Steckbrief-Store (A2: kein answers) |
+| Activity `draft_proposal` | `run_agent` + `get_llm_provider()` → `ProposalOutput` |
+| Provider TextBlocks | B1 konkatenieren; Thinking ignoriert |
+
+## Soll-Ablauf (freigegeben)
+
+```
+task
+  → draft_proposal: run_agent(Claude|Fake) → Proposal + Audit AGENT_PROPOSAL_GENERATED
+  → create_request (Payload = ProposalOutput, Hash gebunden)   # A2: kein answers
+  → wait authorized | EXPIRED
+  → begin_execution (Kern prüft HMAC/Bindung/Verbrauch)
+  → apply_write → _apply_steckbrief → projekte/<id>/ im git-Store
+  → verify_write / reconcile
+  → Status aus Kontroll-DB
+```
+
+Invarianten bleiben: keine Authorization/Status aus LLM; `decided_by` nur
+`human:`; echte SQLite + echtes git in Invarianten-/Absturztests.
+
+## Dateien (nach Freigabe der Tests)
+
+```
+src/pmi/claude_provider.py          ThinkingBlock-Fix (B1)
+src/pmi/temporal/activities.py      draft_proposal → run_agent; get_llm_provider()
+src/pmi/temporal/workflow.py        Timeout D1 (120s / 3)
+tests/test_claude_provider.py       TextBlock-Konkatenation (B1)
+tests/test_temporal_agent.py        FakeLLM → Steckbrief-Apply, Invarianten
+config.py                           DRAFT_PROPOSAL_* PROVISIONAL (D1)
+```
+
+Bestehende Temporal-Tests (touch_file-Stub) müssen bei Implementierung über
+`get_llm_provider()` → FakeLLM weitergrün bleiben bzw. Steckbrief-Pfad nutzen.
+Kein neues Spezifikationsdokument. Kurzer `docs/decisions.md`-Eintrag nur bei
+neuer Abweichung.
+
+## Tests (Haltepunkt 2)
+
+Rote Tests vorgelegt. Echte DB + git; Kern nicht mocken. Kein `answers_*` (A2).
+
+| Test | Soll |
+|---|---|
+| `test_draft_uses_run_agent_payload` | Proposal = `ProposalOutput`; `proposed_by=agent:llm`; kein `touch_file` |
+| `test_draft_dedup_returns_same_proposal` | Retry derselben step/dedup → dieselbe proposal_id; ein AGENT_PROPOSAL_GENERATED |
+| `test_apply_steckbrief_after_approve` | FakeLLM-Draft → approve → apply → `projekte/<id>/`; Status APPLIED |
+| `test_llm_creates_no_authorization` | nach Draft: Authorization-Count 0 |
+| `test_provider_concatenates_text_blocks` | Thinking + zwei TextBlocks → konkatenierter Text (B1) |
+| `test_draft_timeout_constants_provisional` | config: 120s / attempts 3 (D1) |
+
+## Haltepunkte
+
+1. [x] Plan inkl. A–F freigegeben (A2 B1 C1 D1 E1 F1).
+2. [x] Rote Tests freigegeben.
+3. [x] Implementierung grün: `169 passed` (volle Suite, 2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+169 passed in 221.07s
+```
+
+Auftrag-7-Fokus zuvor: `tests/test_temporal_agent.py` + TextBlock + CLI = 10 passed;
+claude/agent/temporal = 44 passed.
+
+## Nicht in diesem Auftrag (F1)
+
+- UI / Frontend
+- Deploy / Hosting
+- LangGraph, Policy-Engine
+- Schemaänderung an `ProposalOutput`
+- Evaluator im Workflow (C1)
+- answers / K4 (A2)
+- Live-Lauf gegen PDF (nur wenn Mark extra freigibt)
+- Reconciliation-Strategie `DIVERGENT` (Abschnitt 12, PROVISIONAL `none`)
