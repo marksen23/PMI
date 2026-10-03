@@ -659,9 +659,20 @@ PDF lokal unter `it-projekte/` (gitignored).
 # Auftrag 7 – Agentenarchitektur schliessen (Plan)
 
 Stand: 2026-10-03  
-Status: **Haltepunkt 1 – warte auf Freigabe**  
+Status: **Haltepunkt 2 – rote Tests vorgelegt, warte auf Freigabe**  
 Ziel: KI-Plattform für Projektmanagement – Agentenpfad von Aufgabe bis
 genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
+
+## Entscheidungen A–F (freigegeben 2026-10-03)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A2** | Schritt 2 weglassen; `offene_fragen` nur im Steckbrief; K4 bleibt zu |
+| **B** | **B1** | alle TextBlocks konkatenieren; Thinking/andere ignorieren |
+| **C** | **C1** | kein Evaluator im Workflow |
+| **D** | **D1** | `start_to_close=120s`, `maximum_attempts=3`; PROVISIONAL in config.py |
+| **E** | **E1** | Temporal-Tests mit `FakeLLMProvider`; Live-Key ausserhalb |
+| **F** | **F1** | nur Agentenarchitektur; kein UI/Deploy/LangGraph |
 
 ## Ist-Stand (Inventur)
 
@@ -679,13 +690,12 @@ genehmigtem Steckbrief im Store, ohne UI und ohne Deploy.
 Lücke: Temporal-Draft erzeugt kein LLM-`ProposalOutput`. Der Store-Pfad für
 Steckbriefe existiert schon; der Workflow nutzt ihn nicht.
 
-## Soll-Ablauf (nach Freigabe)
+## Soll-Ablauf (freigegeben)
 
 ```
 task
   → draft_proposal: run_agent(Claude|Fake) → Proposal + Audit AGENT_PROPOSAL_GENERATED
-  → [OFFEN A] optional answers, wenn offene_fragen nicht leer
-  → create_request (Payload = ProposalOutput, Hash gebunden)
+  → create_request (Payload = ProposalOutput, Hash gebunden)   # A2: kein answers
   → wait authorized | EXPIRED
   → begin_execution (Kern prüft HMAC/Bindung/Verbrauch)
   → apply_write → _apply_steckbrief → projekte/<id>/ im git-Store
@@ -696,82 +706,48 @@ task
 Invarianten bleiben: keine Authorization/Status aus LLM; `decided_by` nur
 `human:`; echte SQLite + echtes git in Invarianten-/Absturztests.
 
-## Entscheidungen – OFFEN (Mark)
-
-Nicht selbst treffen. Freigabe bitte als Buchstaben A–F (oder Ablehnung).
-
-- **A – answers / offene_fragen**  
-  A1: wie Auftrag-2-Plan: warten + `answers`-Signal, Persistenz nur `append_audit`,
-  keine neue Proposal-Version (K4 bleibt zu).  
-  A2: Schritt 2 weglassen; `offene_fragen` nur im Steckbrief speichern.  
-  A3: K4 jetzt: Antworten erzeugen neue Proposal-Version vor `create_request`.
-
-- **B – ThinkingBlock im Provider**  
-  B1: alle `TextBlock`s konkatenieren; Thinking/andere Blöcke ignorieren.  
-  B2: ersten `TextBlock` nehmen; Fail wenn keiner.  
-  (Live-Skript hatte den Bug schon; Provider noch nicht.)
-
-- **C – Evaluator im Workflow**  
-  C1: nicht in diesem Auftrag (Prüfer bleiben CLI/Skript).  
-  C2: optionale Activity nach Draft, Ergebnis nur Audit, nie Auth/Status.  
-  C3: C2 + Prüferwahl über Workflow-Input (`justitia|ihp|nd_bed|none`).
-
-- **D – draft_proposal Timeouts (PROVISIONAL vorschlagen)**  
-  D1: `start_to_close=120s`, `maximum_attempts=3` (Netz/LLM).  
-  D2: andere Werte (Mark nennt sie).  
-  Stub-Tests behalten kurze Override-Fristen.
-
-- **E – Test-Provider**  
-  E1: Temporal-Tests weiter mit `FakeLLMProvider` (festes JSON); Live nur mit
-  Key + Workspace in der Umgebung.  
-  E2: anderer Schnitt (Mark nennt ihn).
-
-- **F – Scope dieser Lieferung**  
-  F1: nur Agentenarchitektur (Draft→Approve→Steckbrief-Store), kein UI, kein Deploy,
-  kein LangGraph, keine Policy-Engine.  
-  F2: erweitert um … (Mark nennt Zusatz).
-
 ## Dateien (nach Freigabe der Tests)
 
 ```
-src/pmi/claude_provider.py          ThinkingBlock-Fix (B)
-src/pmi/temporal/activities.py      draft_proposal → run_agent; Dedup unverändert
-src/pmi/temporal/workflow.py        Timeout D; optional Schritt 2 (A)
-tests/test_claude_provider.py       TextBlock / ThinkingBlock
-tests/test_temporal_agent.py        neu: FakeLLM → Steckbrief-Apply, Invarianten
-config.py                           nur wenn D neue PROVISIONAL-Konstanten braucht
+src/pmi/claude_provider.py          ThinkingBlock-Fix (B1)
+src/pmi/temporal/activities.py      draft_proposal → run_agent; get_llm_provider()
+src/pmi/temporal/workflow.py        Timeout D1 (120s / 3)
+tests/test_claude_provider.py       TextBlock-Konkatenation (B1)
+tests/test_temporal_agent.py        FakeLLM → Steckbrief-Apply, Invarianten
+config.py                           DRAFT_PROPOSAL_* PROVISIONAL (D1)
 ```
 
-Kein neues Spezifikationsdokument. Abweichung von Skizze Abschnitt 11
-(„kein echter LLM im Agent“ / „kein Temporal“) bereits durch Auftrag 2/3
-überholt; bei neuer Abweichung kurzer Eintrag in `docs/decisions.md`.
+Bestehende Temporal-Tests (touch_file-Stub) müssen bei Implementierung über
+`get_llm_provider()` → FakeLLM weitergrün bleiben bzw. Steckbrief-Pfad nutzen.
+Kein neues Spezifikationsdokument. Kurzer `docs/decisions.md`-Eintrag nur bei
+neuer Abweichung.
 
-## Tests (Haltepunkt 2, nach Freigabe von 1)
+## Tests (Haltepunkt 2)
 
-Rote Tests vor Implementierung. Echte DB + git; Kern nicht mocken.
+Rote Tests vorgelegt. Echte DB + git; Kern nicht mocken. Kein `answers_*` (A2).
 
 | Test | Soll |
 |---|---|
-| `test_draft_uses_run_agent_payload` | Proposal in DB ist `ProposalOutput`; `proposed_by=agent:llm`; kein `touch_file` |
-| `test_draft_dedup_returns_same_proposal` | Retry derselben step/dedup → dieselbe proposal_id, ein Audit |
-| `test_apply_steckbrief_after_approve` | FakeLLM-Draft → approve → apply → Dateien unter `projekte/<id>/`; Status APPLIED |
-| `test_llm_creates_no_authorization` | nach Draft: Authorization-Count 0, kein Statuswechsel |
-| `test_provider_skips_thinking_block` | Fake-Response mit Thinking+Text → nur Text (B) |
-| `test_answers_*` | nur wenn A1 oder A3 gewählt |
-
-Bestehende Temporal-/Crash-/Evaluator-Suite bleibt grün.
+| `test_draft_uses_run_agent_payload` | Proposal = `ProposalOutput`; `proposed_by=agent:llm`; kein `touch_file` |
+| `test_draft_dedup_returns_same_proposal` | Retry derselben step/dedup → dieselbe proposal_id; ein AGENT_PROPOSAL_GENERATED |
+| `test_apply_steckbrief_after_approve` | FakeLLM-Draft → approve → apply → `projekte/<id>/`; Status APPLIED |
+| `test_llm_creates_no_authorization` | nach Draft: Authorization-Count 0 |
+| `test_provider_concatenates_text_blocks` | Thinking + zwei TextBlocks → konkatenierter Text (B1) |
+| `test_draft_timeout_constants_provisional` | config: 120s / attempts 3 (D1) |
 
 ## Haltepunkte
 
-1. [ ] Dieser Plan inkl. A–F – **warte auf Freigabe**.
-2. [ ] Rote Tests – vorlegen, auf Freigabe warten.
+1. [x] Plan inkl. A–F freigegeben (A2 B1 C1 D1 E1 F1).
+2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
 3. [ ] Implementierung bis grün; Testausgabe im Bericht.
 
-## Nicht in diesem Auftrag (außer F2)
+## Nicht in diesem Auftrag (F1)
 
 - UI / Frontend
 - Deploy / Hosting
 - LangGraph, Policy-Engine
 - Schemaänderung an `ProposalOutput`
+- Evaluator im Workflow (C1)
+- answers / K4 (A2)
 - Live-Lauf gegen PDF (nur wenn Mark extra freigibt)
 - Reconciliation-Strategie `DIVERGENT` (Abschnitt 12, PROVISIONAL `none`)
