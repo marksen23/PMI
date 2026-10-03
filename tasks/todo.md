@@ -1053,7 +1053,7 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 # Auftrag 10 – K4 / answers-Minimalpfad (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)**  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03 Freigabe).  
 (HP2 abgenommen human:markus, 2026-10-03; HP3 danach umgesetzt.)  
 Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
 Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
