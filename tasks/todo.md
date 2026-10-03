@@ -1195,11 +1195,16 @@ Datei: `tests/test_k4_review.py`
 tests/test_k4_review.py: 14 failed, 2 passed
 ```
 
-Grün nur whitespace/leer (Person schon abgewiesen). Rest Assertion-Rot.
-**Keine Implementierung bis Freigabe.**
+## Nachweis Grün (nach Implementierung)
+
+```
+tests/test_k4_review.py: 16 passed
+tests/test_k4_answers.py + review: 26 passed
+volle Suite: 214 passed in 232.94s
+```
 
 ## Haltepunkte
 
 1. [x] Review-Entscheidung human:markus.
-2. [ ] Rote Tests – vorgelegt, **warte auf Freigabe**.
-3. [ ] Implementierung bis grün.
+2. [x] Rote Tests abgenommen (human:markus, 2026-10-03 21:57 Europe/Berlin).
+3. [x] Implementierung grün – **warte auf Abnahme; kein Merge**.
