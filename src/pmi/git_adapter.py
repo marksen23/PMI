@@ -222,6 +222,7 @@ class GitProjectStoreAdapter:
             "FROM Execution e "
             "JOIN ExecutionRequest er ON er.id = e.request_id "
             "JOIN Proposal p ON p.id = er.proposal_id "
+            "AND p.version = er.proposal_version "
             "WHERE e.status='APPLIED'"
         ).fetchall()
 

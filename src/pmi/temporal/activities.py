@@ -75,6 +75,8 @@ class CreateRequestResult:
     request_id: str
     request_hash: str
     expected_revision: str
+    proposal_version: int = 1
+    payload: dict | None = None
 
 
 @dataclass
@@ -146,7 +148,9 @@ def _load_complete_draft(conn, dedup_key: str) -> DraftProposalResult | None:
     data = json.loads(existing["payload_json"])
     proposal_id = data["proposal_id"]
     row = conn.execute(
-        "SELECT payload_json FROM Proposal WHERE id=?", (proposal_id,)
+        "SELECT payload_json FROM Proposal WHERE id=? "
+        "ORDER BY version DESC LIMIT 1",
+        (proposal_id,),
     ).fetchone()
     if row is None:
         raise RuntimeError(f"DRAFT_PROPOSAL Dedup ohne Proposal: {proposal_id}")
@@ -282,6 +286,65 @@ async def activity_draft_proposal(args: DraftProposalInput) -> DraftProposalResu
     return result
 
 
+@dataclass
+class ApplyAnswersInput:
+    db_path: str
+    proposal_id: str
+    answers: list[str]
+    person: str
+    step: int
+    workflow_id: str
+
+
+@dataclass
+class ApplyAnswersResult:
+    proposal_id: str
+    version: int
+    payload: dict
+
+
+@_activity.defn(name="apply_answers")
+async def activity_apply_answers(args: ApplyAnswersInput) -> ApplyAnswersResult:
+    from temporalio.exceptions import ApplicationError
+
+    from pmi.answers import apply_answers
+
+    conn = get_db(args.db_path)
+    init_schema(conn)
+    try:
+        result = apply_answers(
+            conn,
+            proposal_id=args.proposal_id,
+            answers=list(args.answers),
+            person=args.person,
+        )
+    except ValueError as exc:
+        conn.close()
+        # Business-Regel (Person/D1/Fragen) – nicht retryen (Befund 6)
+        raise ApplicationError(str(exc), non_retryable=True) from exc
+    row = conn.execute(
+        "SELECT payload_json FROM Proposal WHERE id=? AND version=?",
+        (args.proposal_id, result["version"]),
+    ).fetchone()
+    append_audit(
+        conn,
+        _dedup(args.workflow_id, args.step, "ANSWERS_APPLIED"),
+        "ANSWERS_APPLIED",
+        None,
+        0,
+        {
+            "proposal_id": args.proposal_id,
+            "version": result["version"],
+        },
+    )
+    conn.close()
+    return ApplyAnswersResult(
+        proposal_id=args.proposal_id,
+        version=int(result["version"]),
+        payload=json.loads(row["payload_json"]),
+    )
+
+
 @_activity.defn(name="create_request")
 async def activity_create_request(args: CreateRequestInput) -> CreateRequestResult:
     import subprocess as _sp
@@ -289,41 +352,60 @@ async def activity_create_request(args: CreateRequestInput) -> CreateRequestResu
     conn = get_db(args.db_path)
     init_schema(conn)
 
-    row = conn.execute(
-        "SELECT payload_json FROM Proposal WHERE id=?", (args.proposal_id,)
-    ).fetchone()
-    payload = json.loads(row["payload_json"])
-
     head = _sp.check_output(
         ["git", "rev-parse", "HEAD"], cwd=args.repo_path
     ).decode().strip()
 
-    request_id = insert_request(
-        conn,
-        proposal_id=args.proposal_id,
-        proposal_version=1,
-        payload=payload,
-        expected_revision=head,
-        workflow_id=args.workflow_id,
-    )
-    req_row = conn.execute(
-        "SELECT request_hash FROM ExecutionRequest WHERE id=?", (request_id,)
-    ).fetchone()
-    request_hash = req_row["request_hash"]
+    # BEGIN IMMEDIATE: Race mit apply_answers → eine konsistente Welt (D1 / Befund 3)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT payload_json, version FROM Proposal WHERE id=? "
+            "ORDER BY version DESC LIMIT 1",
+            (args.proposal_id,),
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        proposal_version = int(row["version"])
 
-    append_audit(
-        conn,
-        _dedup(args.workflow_id, args.step, "CREATE_REQUEST"),
-        "CREATE_REQUEST",
-        None,
-        0,
-        {"request_id": request_id},
-    )
+        request_id = insert_request(
+            conn,
+            proposal_id=args.proposal_id,
+            proposal_version=proposal_version,
+            payload=payload,
+            expected_revision=head,
+            workflow_id=args.workflow_id,
+            commit=False,
+        )
+        req_row = conn.execute(
+            "SELECT request_hash FROM ExecutionRequest WHERE id=?", (request_id,)
+        ).fetchone()
+        request_hash = req_row["request_hash"]
+
+        append_audit(
+            conn,
+            _dedup(args.workflow_id, args.step, "CREATE_REQUEST"),
+            "CREATE_REQUEST",
+            None,
+            0,
+            {"request_id": request_id},
+            commit=False,
+        )
+        conn.commit()
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        conn.close()
+        raise
+
     conn.close()
     return CreateRequestResult(
         request_id=request_id,
         request_hash=request_hash,
         expected_revision=head,
+        proposal_version=proposal_version,
+        payload=payload,
     )
 
 
@@ -443,6 +525,7 @@ async def activity_read_execution_status(args: ReadExecutionStatusInput) -> str:
 
 ACTIVITIES = [
     activity_draft_proposal,
+    activity_apply_answers,
     activity_create_request,
     activity_mark_request_expired,
     activity_begin_execution,

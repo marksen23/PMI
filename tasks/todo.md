@@ -943,7 +943,7 @@ G4 init; G5 `make demo` → scripts/demo.sh FakeLLM.
 # Auftrag 9 – Live-E2E über CLI (Plan)
 
 Stand: 2026-10-03  
-Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03).  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (Merge PR #15 → `6579693`).
 Voraussetzung: Auftrag 8 gemergt (`9947cb6`), D4 gemergt (`8eaf325`).  
 Ziel: Einmaliger Nachweis, dass der gemergte Bedienpfad mit **echtem LLM**
 (Claude) und **echtem Temporal** von `pmi start` bis APPLIED läuft – ohne UI,
@@ -982,7 +982,7 @@ pmi status → APPLIED (+ Steckbrief im Store)
 Bericht in tasks/todo.md
 ```
 
-## Dateien (nach Freigabe HP2 → HP3)
+## Dateien
 
 ```
 scripts/live_demo.sh     A1: Live-Durchstich (compose + worker + CLI)
@@ -1034,7 +1034,7 @@ Hinweis: `ExecutionRequest.status` blieb OPEN; `Execution.status=APPLIED`
 
 Abnahme-Klärung (human:markus, 2026-10-03): OPEN bei Execution=APPLIED ist
 bewusst – Request nur OPEN|EXPIRED; Erfolg auf Execution + `consumed_by_execution_id`.
-Kein K5; kein Fix in diesem PR. Terminaler Request-Status ggf. späterer Auftrag.
+Kein K5; kein Fix in A9. Terminaler Request-Status ggf. späterer Auftrag.
 
 Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM).
 
@@ -1047,3 +1047,172 @@ Checkliste: L1–L10 erfüllt. D5: compose host-network (Bridge-TCP in Cloud-VM)
 - Evaluator im Temporal-Workflow (bleibt C1 aus A7)
 - Abschnitt-12-Entscheidungen (`DIVERGENT` etc.)
 - Neue pytest-Live-Tests (E1)
+
+---
+
+# Auftrag 10 – K4 / answers-Minimalpfad (Plan)
+
+Stand: 2026-10-03  
+Status: **Umgesetzt, grün (Haltepunkt 3)** – abgenommen human:markus (2026-10-03 Freigabe).  
+(HP2 abgenommen human:markus, 2026-10-03; HP3 danach umgesetzt.)  
+Voraussetzung: Auftrag 9 gemergt (`6579693`); A7 A2 (`answers` weggelassen, K4 zu).  
+Ziel: Menschliche Antworten auf `offene_fragen` erzeugen eine **neue Proposal-Version**
+und einen **neuen ExecutionRequest** mit neuem Hash (Skizze K4) – ohne UI, ohne
+LangGraph, ohne Evaluator im Workflow.
+
+## Entscheidungen (freigegeben human:markus, 2026-10-03)
+
+| ID | Wahl | Kurz |
+|---|---|---|
+| **A** | **A3** | Temporal-Signal `answers` **und** CLI `pmi answers` |
+| **B** | **B1** | volle K4: neue Proposal-Version + neuer Request + Diff |
+| **C** | **C3** | Person Pflicht; Prefix `human:` serverseitig |
+| **D** | **D1** | answers nur vor `create_request` |
+| **E** | **E1** | Request-Status unverändert (L9) |
+| **F** | **F1** | nur Kern + Workflow + CLI + Tests |
+
+## Ist-Stand (nach HP3)
+
+| Baustein | Stand |
+|---|---|
+| `Proposal.version`, `insert_request(proposal_version=…)` | PK `(id,version)`; `diff_json` |
+| `draft_proposal` / create_request | create_request auf neueste Version |
+| Workflow | Wait auf answers-Signal wenn `offene_fragen` |
+| CLI `pmi answers` / `pmi.answers` | vorhanden |
+| `apply_answers` | `src/pmi/answers.py` |
+
+## Soll-Ablauf (freigegeben)
+
+```
+draft_proposal → Proposal v1
+  → [offene_fragen nicht leer:] wait answers-Signal / CLI → apply_answers
+       → Proposal v2 (human:<person>) + diff_json
+  → create_request auf neueste Version (neuer Hash)
+  → approve / run / APPLIED
+```
+
+Leere `offene_fragen`: kein answers-Warten; create_request auf v1.
+
+## Dateien
+
+```
+src/pmi/answers.py                 apply_answers (Kern)
+src/pmi/db.py                      PK (id,version), diff_json
+src/pmi/cli.py                     pmi answers
+src/pmi/temporal/workflow.py       Signal answers; Wait vor create_request
+src/pmi/temporal/activities.py     create_request liest neueste Version
+tests/test_k4_answers.py           neu (HP2)
+```
+
+## Tests (Haltepunkt 2)
+
+| Test | Soll |
+|---|---|
+| `test_apply_answers_creates_proposal_version_2` | B1: id gleich, version=2 |
+| `test_apply_answers_proposed_by_human_prefix` | C3: `human:markus` |
+| `test_apply_answers_empty_person_rejected` | C3: ValueError, keine v2 |
+| `test_apply_answers_stores_diff` | B1: `diff_json` nicht leer |
+| `test_apply_answers_no_authorization` | Auth-Count 0 |
+| `test_create_request_after_answers_uses_v2_hash` | B1/D1: proposal_version=2, Hash≠v1 |
+| `test_answers_rejected_after_create_request` | D1 |
+| `test_cli_answers_command` | A3 CLI |
+| `test_workflow_waits_for_answers_signal` | A3/D1 Signal vor Request |
+| `test_workflow_skips_answers_when_no_questions` | leere Fragen → v1 Request |
+
+## Haltepunkte
+
+1. [x] Plan + A–F freigegeben (human:markus) → A3 B1 C3 D1 E1 F1.
+2. [x] Rote Tests abgenommen (human:markus, 2026-10-03).
+   Vor HP3: `pytest tests/test_k4_answers.py` 9 failed, 1 passed (7.07s).
+3. [x] Implementierung grün: `tests/test_k4_answers.py` 10 passed;
+   volle Suite `198 passed` (2026-10-03).
+
+## Testausgabe (Haltepunkt 3)
+
+```
+tests/test_k4_answers.py: 10 passed in 1.11s
+198 passed in 228.23s (0:03:48)
+```
+
+A3 Signal+CLI; B1 v2+Diff+neuer Request-Hash; C3 `human:`; D1 vor create_request;
+E1 Request-Status unverändert; F1 ohne UI/Live.
+
+## Nicht in diesem Auftrag
+
+- UI / Frontend
+- LangGraph, Policy-Engine
+- Schemaänderung an `ProposalOutput`-Feldern (nur Versionierung/Diff am Proposal)
+- Evaluator im Temporal-Workflow (A7 C1)
+- Abschnitt-12 `DIVERGENT`-Reconciliation
+- Terminaler Request-Status (E1 / L9)
+- Live-Skript-Erweiterung (F1)
+
+---
+
+# Auftrag 10 – Review-Nachzug (abgenommen)
+
+Stand: 2026-10-03  
+Status: **PR #17 abgenommen**  
+decided_by: human:markus (2026-10-03 23:33 Europe/Berlin)  
+Merge durch Markus. Agent merged nicht.
+
+## OFFEN (nicht umsetzen – nur notiert)
+
+1. Eigener answers-Timeout statt Wiederverwendung von `approval_timeout_seconds`.
+2. Breites `except Exception` um `wait_condition` im Workflow – nur Timeout soll `EXPIRED` ergeben.
+3. Idempotenz von `apply_answers` nur über gleichen Antworttext (zu eng / zu lose prüfen).
+4. Signal nach `create_request`: Ablehnung läuft über `apply_answers`; Abdeckung des echten Workflow-Pfads im Test prüfen.
+
+## Befunde → Soll
+
+| # | Befund | Soll |
+|---|---|---|
+| 1 | Migration FK/Abbruch | atomar; ER-FK `(id,version)`; Tests ALTER mit/ohne Requests + Wiederanlauf |
+| 2 | answers-Wait ohne Timeout | Timeout → EXPIRED |
+| 3 | D1 nicht atomar; Signal nach Request still | BEGIN IMMEDIATE; Race-Test; Ablehnung+Audit |
+| 4 | CLI nur DB-Write | CLI signalisiert Workflow; kein v3 ohne Fragen |
+| 5 | Person-Präfixe | `agent:`/`human:`/Namensraum + whitespace ablehnen |
+| 6 | Activity nicht idempotent | Retry → kein 2. v2; Person = non-retryable |
+| 7 | alle offene_fragen geleert | nur beantwortete entfernen; v2 gegen ProposalOutput |
+
+Zusatz: immer-wahre Assertion in `test_k4_answers.py` → `assert result.status == "APPLIED"`.
+
+## Tests (rot)
+
+Datei: `tests/test_k4_review.py`
+
+| Test | # |
+|---|---|
+| `test_migrate_legacy_without_requests_allows_new_request` | 1 |
+| `test_migrate_legacy_with_requests_succeeds` | 1 |
+| `test_migrate_resume_after_aborted_partial` | 1 |
+| `test_answers_wait_timeout_expires` | 2 |
+| `test_d1_race_answers_vs_create_request` | 3 |
+| `test_signal_after_create_request_rejected_and_audited` | 3 |
+| `test_cli_answers_signals_waiting_workflow` | 4 |
+| `test_answers_on_empty_questions_does_not_create_v3` | 4 |
+| `test_apply_answers_rejects_namespace_person[...]` | 5 |
+| `test_apply_answers_activity_idempotent_retry` | 6 |
+| `test_apply_answers_invalid_person_non_retryable` | 6 |
+| `test_merge_keeps_unanswered_questions` | 7 |
+
+## Nachweis Rot (vor Freigabe)
+
+```
+tests/test_k4_review.py: 14 failed, 2 passed
+```
+
+## Nachweis Grün (nach Implementierung)
+
+```
+tests/test_k4_review.py: 16 passed
+tests/test_k4_answers.py + review: 26 passed
+volle Suite: 214 passed in 232.94s
+```
+
+## Haltepunkte
+
+1. [x] Review-Entscheidung human:markus.
+2. [x] Rote Tests abgenommen (human:markus, 2026-10-03 21:57 Europe/Berlin).
+3. [x] Implementierung grün.
+4. [x] Abnahme PR #17 (human:markus, 2026-10-03 23:33 Europe/Berlin) – Merge durch Markus.

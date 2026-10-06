@@ -12,6 +12,8 @@ with workflow.unsafe.imports_passed_through():
     import config as _config
 
     from pmi.temporal.activities import (
+        ApplyAnswersInput,
+        ApplyAnswersResult,
         ApplyWriteInput,
         BeginExecutionInput,
         CreateRequestInput,
@@ -22,6 +24,7 @@ with workflow.unsafe.imports_passed_through():
         ReadExecutionStatusInput,
         ReconcileInput,
         VerifyWriteInput,
+        activity_apply_answers,
         activity_apply_write,
         activity_begin_execution,
         activity_create_request,
@@ -61,10 +64,16 @@ _DRAFT_RETRY = RetryPolicy(
 class InitiationWorkflow:
     def __init__(self) -> None:
         self._auth_id: str | None = None
+        self._answers: dict | None = None
 
     @workflow.signal
     def authorized(self, auth_id: str) -> None:
         self._auth_id = auth_id
+
+    @workflow.signal
+    def answers(self, payload: dict) -> None:
+        """A3: Signal mit answers + person; Workflow wartet vor create_request (D1)."""
+        self._answers = payload
 
     @workflow.run
     async def run(self, args: WorkflowInput) -> WorkflowResult:
@@ -83,7 +92,36 @@ class InitiationWorkflow:
             retry_policy=_DRAFT_RETRY,
         )
 
-        # Schritt 3: create_request (liest git HEAD, schreibt ExecutionRequest)
+        payload = draft.payload
+        questions = list((payload.get("steckbrief") or {}).get("offene_fragen") or [])
+
+        # Schritt 2: answers nur wenn offene_fragen nicht leer (A3/D1)
+        if questions:
+            try:
+                await workflow.wait_condition(
+                    lambda: self._answers is not None,
+                    timeout=timedelta(seconds=args.approval_timeout_seconds),
+                )
+            except Exception:
+                # Timeout ohne Signal → EXPIRED, kein ExecutionRequest (Befund 2)
+                return WorkflowResult(status="EXPIRED")
+            answers_payload = self._answers or {}
+            applied: ApplyAnswersResult = await workflow.execute_activity(
+                activity_apply_answers,
+                ApplyAnswersInput(
+                    db_path=args.db_path,
+                    proposal_id=draft.proposal_id,
+                    answers=list(answers_payload.get("answers") or []),
+                    person=str(answers_payload.get("person") or ""),
+                    step=2,
+                    workflow_id=wf_id,
+                ),
+                start_to_close_timeout=timedelta(seconds=10),
+                retry_policy=_RETRY,
+            )
+            payload = applied.payload
+
+        # Schritt 3: create_request (neueste Version / neuer Hash)
         create: CreateRequestResult = await workflow.execute_activity(
             activity_create_request,
             CreateRequestInput(
@@ -96,6 +134,8 @@ class InitiationWorkflow:
             start_to_close_timeout=timedelta(seconds=10),
             retry_policy=_RETRY,
         )
+        if create.payload is not None:
+            payload = create.payload
 
         # Schritt 4: Warte auf authorized-Signal oder Timeout
         try:
@@ -104,7 +144,6 @@ class InitiationWorkflow:
                 timeout=timedelta(seconds=args.approval_timeout_seconds),
             )
         except Exception:
-            # Timeout: Request terminal setzen, kein Commit
             await workflow.execute_activity(
                 activity_mark_request_expired,
                 MarkRequestExpiredInput(
@@ -137,7 +176,6 @@ class InitiationWorkflow:
         )
 
         if not execution_id:
-            # Fremde oder verbrauchte Authorization – kein Commit
             return WorkflowResult(status="AUTH_REJECTED")
 
         # Schritt 7: apply_write (max. 5 Versuche)
@@ -148,7 +186,7 @@ class InitiationWorkflow:
                 ApplyWriteInput(
                     db_path=args.db_path,
                     repo_path=args.repo_path,
-                    payload=draft.payload,
+                    payload=payload,
                     expected_revision=create.expected_revision,
                     idempotency_key=create.request_hash,
                     execution_id=execution_id,
@@ -176,7 +214,7 @@ class InitiationWorkflow:
                 retry_policy=_RETRY,
             )
 
-        # Schritt 9: reconcile – schließt offene Executions, erkennt Tamperung
+        # Schritt 9: reconcile
         await workflow.execute_activity(
             activity_reconcile,
             ReconcileInput(
