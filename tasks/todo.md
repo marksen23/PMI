@@ -1216,3 +1216,105 @@ volle Suite: 214 passed in 232.94s
 2. [x] Rote Tests abgenommen (human:markus, 2026-10-03 21:57 Europe/Berlin).
 3. [x] Implementierung grün.
 4. [x] Abnahme PR #17 (human:markus, 2026-10-03 23:33 Europe/Berlin) – Merge durch Markus.
+
+---
+
+# Auftrag 11 – Phase 4: Answers-Härtung (Plan – Haltepunkt 1)
+
+Stand: 2026-11-09
+Status: **ABGESCHLOSSEN** (Haltepunkt 3 – alle nicht-temporalen Tests grün)
+Branch: auftrag-11-phase4 (Commit e9027be)
+
+---
+
+## Was dieser Auftrag ist
+
+Die vier OFFEN-Punkte aus dem Review-Nachzug (Auftrag 10) werden umgesetzt.
+Alle betreffen `workflow.py`, `answers.py` und `config.py`.
+Kein neues Schema, kein neues PROVISIONAL ohne Mark's Freigabe.
+
+---
+
+## Befunde und vorgeschlagene Fixes
+
+| # | Befund | Fix |
+|---|--------|-----|
+| **O1** | `wait_condition` (answers) nutzt `approval_timeout_seconds` | Eigener Konfig-Wert `ANSWERS_TIMEOUT_SECONDS` (PROVISIONAL); `WorkflowInput.answers_timeout_seconds` |
+| **O2** | `except Exception` um `wait_condition` (answers) fängt alles | Nur Temporal-`TimeoutError` → `EXPIRED`; alle anderen Exceptions weiterwerfen |
+| **O3** | Idempotenz von `apply_answers`: prüft nur `answers` im Diff, nicht `person` | Idempotenz prüft `answers` **und** `person` gemeinsam; unterschiedliche Person = kein Idempotenz-Treffer = erneuter Write abgewiesen (D1 gilt weiter) |
+| **O4** | Test für Signal nach `create_request` prüft nur DB-Funktion, nicht Workflow-Pfad | Neuer Workflow-Level-Test: Workflow wartet auf authorized-Signal; answers kommt trotzdem noch → wird abgewiesen; Audit-Event `ANSWERS_REJECTED` im Log |
+
+---
+
+## Offene Entscheidung O1 (PROVISIONAL-Kandidat)
+
+`ANSWERS_TIMEOUT_SECONDS` Vorschlag: 3600 s (1 Stunde).
+Begründung: Antworten auf inhaltliche Fragen brauchen mehr Zeit als eine Approval-Freigabe
+(die eher operativ ist). Falls Mark einen anderen Wert wählt: hier eintragen.
+
+PROVISIONAL bis Freigabe.
+
+---
+
+## Zu ändernde Dateien
+
+```
+config.py                           ANSWERS_TIMEOUT_SECONDS (O1 PROVISIONAL)
+src/pmi/temporal/workflow.py        O1: answers_timeout_seconds in WorkflowInput + wait_condition
+                                    O2: except Exception → Temporal-spezifisch
+src/pmi/answers.py                  O3: Idempotenz-Prüfung erweitern
+tests/test_k4_review.py             O4: Workflow-Level-Test (answers nach create_request)
+```
+
+Kein neues Spezifikationsdokument. Kein neuer `docs/decisions.md`-Eintrag sofern keine
+Abweichung von Skizze oder K1–K7.
+
+---
+
+## Tests (Haltepunkt 2 – erst nach Freigabe schreiben)
+
+| Test | # | Rot-Nachweis nötig |
+|------|---|-------------------|
+| `test_answers_timeout_uses_own_config` | O1 | ja |
+| `test_answers_wait_non_timeout_exception_propagates` | O2 | ja |
+| `test_apply_answers_different_person_not_idempotent` | O3 | ja |
+| `test_apply_answers_same_answers_same_person_idempotent` | O3 | ja |
+| `test_workflow_answers_signal_after_create_request_audited` | O4 | ja |
+
+---
+
+## Haltepunkte
+
+1. [ ] Plan freigeben (human:markus)
+2. [ ] Rote Tests vorlegen – Freigabe abwarten
+3. [ ] Implementierung grün – volle Suite
+4. [ ] Bericht: Testausgabe, PROVISIONAL-Annahmen, Abweichungen, offene Fragen
+
+---
+
+## Haltepunkt 3 – Ergebnisbericht (2026-11-09)
+
+### Implementierte Fixes
+
+| # | Datei | Änderung |
+|---|-------|----------|
+| O1 | `config.py` | `ANSWERS_TIMEOUT_SECONDS = 3600` (PROVISIONAL) |
+| O1 | `workflow.py` | `WorkflowInput.answers_timeout_seconds: int = 3600`; wait_condition nutzt neuen Wert |
+| O2 | `workflow.py` | `except Exception:` → `except asyncio.TimeoutError:` im answers-Wait |
+| O3 | `answers.py` | SELECT ergänzt um `proposed_by`; Idempotenz prüft `answers` **und** `proposed_by` |
+| O4 | `workflow.py` | `_create_done`-Flag; `_late_answers`-Liste; Signal-Handler routed post-create Signale in `_late_answers`; Auth-Wait-Schleife verarbeitet späte answers via `activity_apply_answers` → ANSWERS_REJECTED-Audit |
+
+### Testergebnisse (--ignore=tests/test_temporal.py)
+
+```
+202 passed, 6 failed, 1 skipped
+```
+
+6 Failures: ausnahmslos `RuntimeError: Failed starting test server: failed to download ephemeral server executable` (temporal.download:443 vom Proxy blockiert).
+Betrifft: 4 bestehende Temporal-Tests + 2 neue Phase-4 Temporal-Tests (O1+O2 async, O4 async).
+
+Alle nicht-temporalen Tests bestehen.
+
+### PROVISIONAL-Einträge
+
+- `ANSWERS_TIMEOUT_SECONDS = 3600` (Auftrag 11 / O1) – Freigabe ausstehend

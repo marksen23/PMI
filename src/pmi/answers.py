@@ -59,7 +59,7 @@ def apply_answers(
             raise ValueError("answers nach create_request abgewiesen (D1)")
 
         latest = conn.execute(
-            "SELECT version, payload_json, COALESCE(diff_json, '') AS diff_json "
+            "SELECT version, proposed_by, payload_json, COALESCE(diff_json, '') AS diff_json "
             "FROM Proposal WHERE id=? ORDER BY version DESC LIMIT 1",
             (proposal_id,),
         ).fetchone()
@@ -83,6 +83,7 @@ def apply_answers(
             if (
                 isinstance(existing_diff, dict)
                 and existing_diff.get("answers") == answer_list
+                and latest["proposed_by"] == f"human:{cleaned_person}"
             ):
                 conn.commit()
                 return {"proposal_id": proposal_id, "version": old_version}

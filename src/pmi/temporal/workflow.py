@@ -1,6 +1,7 @@
 """InitiationWorkflow – deterministischer 10-Schritte-Workflow."""
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import timedelta
 
@@ -45,6 +46,7 @@ class WorkflowInput:
     db_path: str
     repo_path: str
     approval_timeout_seconds: int
+    answers_timeout_seconds: int = 3600
 
 
 @dataclass
@@ -65,6 +67,8 @@ class InitiationWorkflow:
     def __init__(self) -> None:
         self._auth_id: str | None = None
         self._answers: dict | None = None
+        self._create_done: bool = False
+        self._late_answers: list = []
 
     @workflow.signal
     def authorized(self, auth_id: str) -> None:
@@ -73,7 +77,10 @@ class InitiationWorkflow:
     @workflow.signal
     def answers(self, payload: dict) -> None:
         """A3: Signal mit answers + person; Workflow wartet vor create_request (D1)."""
-        self._answers = payload
+        if self._create_done:
+            self._late_answers.append(payload)
+        else:
+            self._answers = payload
 
     @workflow.run
     async def run(self, args: WorkflowInput) -> WorkflowResult:
@@ -100,9 +107,9 @@ class InitiationWorkflow:
             try:
                 await workflow.wait_condition(
                     lambda: self._answers is not None,
-                    timeout=timedelta(seconds=args.approval_timeout_seconds),
+                    timeout=timedelta(seconds=args.answers_timeout_seconds),
                 )
-            except Exception:
+            except asyncio.TimeoutError:
                 # Timeout ohne Signal → EXPIRED, kein ExecutionRequest (Befund 2)
                 return WorkflowResult(status="EXPIRED")
             answers_payload = self._answers or {}
@@ -137,25 +144,67 @@ class InitiationWorkflow:
         if create.payload is not None:
             payload = create.payload
 
-        # Schritt 4: Warte auf authorized-Signal oder Timeout
-        try:
-            await workflow.wait_condition(
-                lambda: self._auth_id is not None,
-                timeout=timedelta(seconds=args.approval_timeout_seconds),
-            )
-        except Exception:
-            await workflow.execute_activity(
-                activity_mark_request_expired,
-                MarkRequestExpiredInput(
-                    db_path=args.db_path,
-                    request_id=create.request_id,
-                    step=5,
-                    workflow_id=wf_id,
-                ),
-                start_to_close_timeout=timedelta(seconds=10),
-                retry_policy=_RETRY,
-            )
-            return WorkflowResult(status="EXPIRED")
+        self._create_done = True  # O4: späte answers-Signale ab hier routen
+
+        # Schritt 4: Warte auf authorized-Signal oder Timeout.
+        # Späte answers-Signale (O4) werden in der Schleife verarbeitet.
+        _auth_deadline = workflow.now() + timedelta(seconds=args.approval_timeout_seconds)
+        while True:
+            _remaining = (_auth_deadline - workflow.now()).total_seconds()
+            if _remaining <= 0:
+                await workflow.execute_activity(
+                    activity_mark_request_expired,
+                    MarkRequestExpiredInput(
+                        db_path=args.db_path,
+                        request_id=create.request_id,
+                        step=5,
+                        workflow_id=wf_id,
+                    ),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=_RETRY,
+                )
+                return WorkflowResult(status="EXPIRED")
+            try:
+                await workflow.wait_condition(
+                    lambda: self._auth_id is not None or bool(self._late_answers),
+                    timeout=timedelta(seconds=_remaining),
+                )
+            except asyncio.TimeoutError:
+                await workflow.execute_activity(
+                    activity_mark_request_expired,
+                    MarkRequestExpiredInput(
+                        db_path=args.db_path,
+                        request_id=create.request_id,
+                        step=5,
+                        workflow_id=wf_id,
+                    ),
+                    start_to_close_timeout=timedelta(seconds=10),
+                    retry_policy=_RETRY,
+                )
+                return WorkflowResult(status="EXPIRED")
+
+            # Späte answers abweisen – ANSWERS_REJECTED Audit in apply_answers (O4)
+            while self._late_answers:
+                late = self._late_answers.pop(0)
+                try:
+                    await workflow.execute_activity(
+                        activity_apply_answers,
+                        ApplyAnswersInput(
+                            db_path=args.db_path,
+                            proposal_id=draft.proposal_id,
+                            answers=list(late.get("answers") or []),
+                            person=str(late.get("person") or ""),
+                            step=4,
+                            workflow_id=wf_id,
+                        ),
+                        start_to_close_timeout=timedelta(seconds=10),
+                        retry_policy=_RETRY,
+                    )
+                except ActivityError:
+                    pass  # ANSWERS_REJECTED Audit bereits in apply_answers geschrieben
+
+            if self._auth_id is not None:
+                break
 
         auth_id = self._auth_id
 
