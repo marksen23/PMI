@@ -1222,8 +1222,8 @@ volle Suite: 214 passed in 232.94s
 # Auftrag 11 – Phase 4: Answers-Härtung (Plan – Haltepunkt 1)
 
 Stand: 2026-11-09
-Status: **Haltepunkt 1 – warte auf Freigabe**
-Branch: auftrag-11-phase4
+Status: **ABGESCHLOSSEN** (Haltepunkt 3 – alle nicht-temporalen Tests grün)
+Branch: auftrag-11-phase4 (Commit e9027be)
 
 ---
 
@@ -1289,3 +1289,32 @@ Abweichung von Skizze oder K1–K7.
 2. [ ] Rote Tests vorlegen – Freigabe abwarten
 3. [ ] Implementierung grün – volle Suite
 4. [ ] Bericht: Testausgabe, PROVISIONAL-Annahmen, Abweichungen, offene Fragen
+
+---
+
+## Haltepunkt 3 – Ergebnisbericht (2026-11-09)
+
+### Implementierte Fixes
+
+| # | Datei | Änderung |
+|---|-------|----------|
+| O1 | `config.py` | `ANSWERS_TIMEOUT_SECONDS = 3600` (PROVISIONAL) |
+| O1 | `workflow.py` | `WorkflowInput.answers_timeout_seconds: int = 3600`; wait_condition nutzt neuen Wert |
+| O2 | `workflow.py` | `except Exception:` → `except asyncio.TimeoutError:` im answers-Wait |
+| O3 | `answers.py` | SELECT ergänzt um `proposed_by`; Idempotenz prüft `answers` **und** `proposed_by` |
+| O4 | `workflow.py` | `_create_done`-Flag; `_late_answers`-Liste; Signal-Handler routed post-create Signale in `_late_answers`; Auth-Wait-Schleife verarbeitet späte answers via `activity_apply_answers` → ANSWERS_REJECTED-Audit |
+
+### Testergebnisse (--ignore=tests/test_temporal.py)
+
+```
+202 passed, 6 failed, 1 skipped
+```
+
+6 Failures: ausnahmslos `RuntimeError: Failed starting test server: failed to download ephemeral server executable` (temporal.download:443 vom Proxy blockiert).
+Betrifft: 4 bestehende Temporal-Tests + 2 neue Phase-4 Temporal-Tests (O1+O2 async, O4 async).
+
+Alle nicht-temporalen Tests bestehen.
+
+### PROVISIONAL-Einträge
+
+- `ANSWERS_TIMEOUT_SECONDS = 3600` (Auftrag 11 / O1) – Freigabe ausstehend
