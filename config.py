@@ -30,6 +30,9 @@ ANTHROPIC_API_KEY: str = _os.environ.get("ANTHROPIC_API_KEY", "")
 # Optional – leer = Default-Workspace. Kommt ausschließlich aus der Umgebung.
 ANTHROPIC_WORKSPACE_ID: str = _os.environ.get("ANTHROPIC_WORKSPACE_ID", "")  # PROVISIONAL
 
+# Timeout für das Warten auf menschliche Antworten (K4/A3).
+ANSWERS_TIMEOUT_SECONDS: int = 3600  # PROVISIONAL – 1 Stunde
+
 # Temporal draft_proposal Timeouts (Auftrag 7 / D1).
 DRAFT_PROPOSAL_START_TO_CLOSE_SECONDS: int = 120  # PROVISIONAL – LLM-Netz
 DRAFT_PROPOSAL_MAXIMUM_ATTEMPTS: int = 3  # PROVISIONAL – LLM-Netz
