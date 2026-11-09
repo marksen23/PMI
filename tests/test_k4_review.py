@@ -691,3 +691,230 @@ def test_merge_keeps_unanswered_questions(tmp_db_path):
     assert "Q3?" in remaining
     assert "Q1?" not in remaining
     assert "nur Q1" in json.dumps(payload, ensure_ascii=False)
+
+# ── Auftrag 11 Phase 4: 4 OFFEN-Punkte (O1–O4) ──────────────────────────────
+
+
+# O1 ─────────────────────────────────────────────────────────────────────────
+
+def test_answers_timeout_config_and_workflowinput_exist():
+    """O1: config.ANSWERS_TIMEOUT_SECONDS vorhanden; WorkflowInput hat answers_timeout_seconds."""
+    import dataclasses
+
+    import config
+    from pmi.temporal.workflow import WorkflowInput
+
+    assert hasattr(config, "ANSWERS_TIMEOUT_SECONDS"), (
+        "config.ANSWERS_TIMEOUT_SECONDS fehlt (O1)"
+    )
+    # Muss einen eigenständigen Wert tragen, nicht einfach AUTHORIZATION_TTL_SECONDS
+    assert config.ANSWERS_TIMEOUT_SECONDS != config.AUTHORIZATION_TTL_SECONDS, (
+        "ANSWERS_TIMEOUT_SECONDS muss sich von AUTHORIZATION_TTL_SECONDS unterscheiden"
+    )
+    field_names = {f.name for f in dataclasses.fields(WorkflowInput)}
+    assert "answers_timeout_seconds" in field_names, (
+        f"WorkflowInput fehlt answers_timeout_seconds; vorhandene Felder: {field_names}"
+    )
+
+
+# O1 + O2 ────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_answers_timeout_independent_of_approval_timeout(
+    tmp_db_path, tmp_git_repo, monkeypatch
+):
+    """O1+O2: answers_timeout_seconds=1 ≠ approval_timeout_seconds=9999 → EXPIRED auf answers-Wait.
+
+    Ohne eigenes Feld (O1) → TypeError.
+    Mit eigenem Feld aber falscher except-Clause (O2) → Workflow hängt / kein EXPIRED.
+    """
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from pmi.temporal.activities import ACTIVITIES
+    from pmi.temporal.workflow import InitiationWorkflow, WorkflowInput
+
+    monkeypatch.setenv("PMI_AUTHORIZATION_HMAC_SECRET", "test-o1o2")
+
+    with _patch_questions(["O1-Frage?"]):
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            async with Worker(
+                env.client,
+                task_queue="o1o2-timeout",
+                workflows=[InitiationWorkflow],
+                activities=ACTIVITIES,
+            ):
+                result = await env.client.execute_workflow(
+                    InitiationWorkflow.run,
+                    WorkflowInput(
+                        task="O1O2",
+                        db_path=str(tmp_db_path),
+                        repo_path=str(tmp_git_repo),
+                        approval_timeout_seconds=9999,
+                        answers_timeout_seconds=1,
+                    ),
+                    id=f"o1o2-{uuid.uuid4()}",
+                    task_queue="o1o2-timeout",
+                )
+
+    assert result.status == "EXPIRED", (
+        f"answers_timeout_seconds=1 muss EXPIRED ergeben, war: {result.status!r}"
+    )
+    conn = get_db(str(tmp_db_path))
+    n_req = conn.execute("SELECT COUNT(*) FROM ExecutionRequest").fetchone()[0]
+    conn.close()
+    assert n_req == 0, "Kein ExecutionRequest nach Timeout auf answers-Warten"
+
+
+# O3 ─────────────────────────────────────────────────────────────────────────
+
+def test_apply_answers_different_person_not_idempotent(tmp_db_path):
+    """O3: Gleiche Antworten, andere Person → kein Idempotenz-Treffer.
+
+    Aktueller Code: answers-Liste allein genügt → zweiter Call gibt version=2 zurück
+    (stilles Idempotenz-Match). Soll: Person unterschiedlich → kein Treffer →
+    Fehler oder neue Version.
+    """
+    from pmi.answers import apply_answers
+
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+    pid = insert_proposal(
+        conn,
+        payload=_proposal_dict(questions=["O3-Frage?"]),
+        proposed_by="agent:llm",
+    )
+    # Erster Aufruf: OK → v2
+    r1 = apply_answers(conn, proposal_id=pid, answers=["O3-Antwort"], person="markus")
+    assert r1["version"] == 2
+
+    # Zweiter Aufruf: gleiche Antworten, andere Person.
+    # Aktuell: Idempotenz-Match auf answers → gibt {"version": 2} zurück ohne Fehler.
+    # Soll: kein Idempotenz-Match → Exception (Fragen schon beantwortet) oder v3.
+    try:
+        r2 = apply_answers(conn, proposal_id=pid, answers=["O3-Antwort"], person="ada")
+        # Falls kein Fehler: muss mindestens v3 angelegt haben
+        assert r2["version"] >= 3, (
+            "O3: anderen Person-Call muss neue Version erzeugen oder Fehler werfen, "
+            f"war stattdessen idempotent auf v{r2['version']}"
+        )
+    except ValueError:
+        # Akzeptabel: Fragen bereits beantwortet → Exception
+        pass
+    conn.close()
+
+
+def test_apply_answers_same_answers_same_person_idempotent(tmp_db_path):
+    """O3 Positiv: gleiche Antworten UND gleiche Person → weiterhin idempotent."""
+    from pmi.answers import apply_answers
+
+    conn = get_db(str(tmp_db_path))
+    init_schema(conn)
+    pid = insert_proposal(
+        conn,
+        payload=_proposal_dict(questions=["O3-Idem?"]),
+        proposed_by="agent:llm",
+    )
+    r1 = apply_answers(conn, proposal_id=pid, answers=["gleich"], person="markus")
+    r2 = apply_answers(conn, proposal_id=pid, answers=["gleich"], person="markus")
+    n = conn.execute(
+        "SELECT COUNT(*) FROM Proposal WHERE id=?", (pid,)
+    ).fetchone()[0]
+    conn.close()
+    assert r1["version"] == r2["version"] == 2, (
+        "O3: gleiche Antworten + gleiche Person muss idempotent bleiben"
+    )
+    assert n == 2, f"O3: nur v1+v2 erlaubt, gefunden {n} Zeilen"
+
+
+# O4 ─────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_workflow_answers_signal_after_create_request_audited(
+    tmp_db_path, tmp_git_repo, monkeypatch
+):
+    """O4: answers-Signal nach create_request → ANSWERS_REJECTED im AuditLog (Workflow-Ebene).
+
+    Bestehender Test prüft nur DB-Funktion direkt. Dieser Test schickt das Signal
+    an einen laufenden Workflow, der bereits create_request ausgeführt hat.
+    Aktuell: Signal landet in self._answers ohne Activity-Aufruf → kein Audit-Event.
+    Soll: Workflow-Signal-Handler erkennt Zustand nach create_request und auditiert.
+    """
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import Worker
+
+    from pmi.temporal.activities import ACTIVITIES
+    from pmi.temporal.workflow import InitiationWorkflow, WorkflowInput
+
+    monkeypatch.setenv("PMI_AUTHORIZATION_HMAC_SECRET", "test-o4")
+
+    with _patch_questions([]):
+        # Leere Fragen → kein answers-Wait → direkt zu create_request
+        async with await WorkflowEnvironment.start_time_skipping() as env:
+            async with Worker(
+                env.client,
+                task_queue="o4-late-signal",
+                workflows=[InitiationWorkflow],
+                activities=ACTIVITIES,
+            ):
+                handle = await env.client.start_workflow(
+                    InitiationWorkflow.run,
+                    WorkflowInput(
+                        task="O4",
+                        db_path=str(tmp_db_path),
+                        repo_path=str(tmp_git_repo),
+                        approval_timeout_seconds=9999,
+                        answers_timeout_seconds=3600,
+                    ),
+                    id=f"o4-{uuid.uuid4()}",
+                    task_queue="o4-late-signal",
+                )
+
+                # Warte auf ExecutionRequest (create_request abgeschlossen)
+                request_id = None
+                for _ in range(200):
+                    await asyncio.sleep(0.05)
+                    conn = get_db(str(tmp_db_path))
+                    row = conn.execute(
+                        "SELECT id FROM ExecutionRequest ORDER BY created_at DESC LIMIT 1"
+                    ).fetchone()
+                    conn.close()
+                    if row:
+                        request_id = row[0]
+                        break
+                assert request_id is not None, "ExecutionRequest muss entstanden sein"
+
+                # Jetzt: verspätetes answers-Signal senden
+                await handle.signal(
+                    InitiationWorkflow.answers,
+                    {"answers": ["verspätet"], "person": "markus"},
+                )
+
+                # Kurz warten damit Activity ausgeführt werden kann
+                for _ in range(40):
+                    await asyncio.sleep(0.05)
+                    conn = get_db(str(tmp_db_path))
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM AuditEvent WHERE event_type='ANSWERS_REJECTED'"
+                    ).fetchone()[0]
+                    conn.close()
+                    if n > 0:
+                        break
+
+                # Prüfung: ANSWERS_REJECTED muss im AuditLog stehen
+                conn = get_db(str(tmp_db_path))
+                n_rejected = conn.execute(
+                    "SELECT COUNT(*) FROM AuditEvent WHERE event_type='ANSWERS_REJECTED'"
+                ).fetchone()[0]
+                conn.close()
+                assert n_rejected >= 1, (
+                    "O4: verspätetes answers-Signal nach create_request muss "
+                    "ANSWERS_REJECTED-Audit erzeugen (Workflow-Ebene)"
+                )
+                # Kein v3
+                conn = get_db(str(tmp_db_path))
+                max_v = conn.execute(
+                    "SELECT MAX(version) FROM Proposal"
+                ).fetchone()[0]
+                conn.close()
+                assert max_v == 1, f"O4: kein v2/v3 erwartet (kein answers-Wait), war {max_v}"
